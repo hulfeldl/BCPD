@@ -13,12 +13,87 @@
 #include <complex>
 #include <cstdint>
 #include <numbers>
+#include <chrono>
 #include <iostream>
-#include <CvPlot/cvplot.h>
+#include <fstream>
+#include <filesystem>
+#include <source_location>
+#include <cassert>
 #include "nanoflann.hpp"
-//#include <eigen3/Eigen/Dense>
-//#include <armadillo>
+#include "tinyply.h"
 
+#ifndef NDEBUG
+    #include <CvPlot/cvplot.h>
+#endif
+
+#define NYSTROM 1
+#define VISUALIZE 0 // Activate visualization
+#define WRITE_DEBUG_OUTPUT 1
+#define PRINT_DEBUG 0
+
+/**
+ * @brief 
+ * 
+ */
+namespace
+{
+    // output
+    const std::filesystem::path outputDir("/home/hulfeldl/DebugOutput/3D/armadillo/");
+
+    class TimeTracker
+    {
+        public:
+
+        TimeTracker(const std::string& trackerName)
+        :   name(trackerName)
+        {
+            start = std::chrono::high_resolution_clock::now();
+
+        }
+
+        ~TimeTracker()
+        {
+            const auto end = std::chrono::high_resolution_clock::now();
+ 
+            const std::chrono::duration<double> diff = end - start;
+            const auto int_ms = std::chrono::duration_cast<std::chrono::milliseconds>(diff).count();
+            std::cout << name << " took: " << int_ms << "ms \n";
+        }
+
+        private:
+            std::chrono::time_point<std::chrono::high_resolution_clock> start;
+            std::string name;
+    };
+
+    template <class FloatType,  uint32_t dim>
+    void writePly(const std::vector<Eigen::Vector<FloatType, dim>>& points, std::filesystem::path& path)
+    {
+        struct double3 { double x, y, z; };
+        std::vector<double3> pointsOut;
+        for(const auto& point : points)
+        {
+            pointsOut.push_back({.x = point[0], .y = point[1], .z = point[2]});
+        }
+
+        tinyply::PlyFile file;
+
+        file.add_properties_to_element("vertex", { "x", "y", "z" },
+            tinyply::Type::FLOAT64, points.size(), reinterpret_cast<uint8_t*>(pointsOut.data()), tinyply::Type::INVALID, 0);
+
+        // Write a binary file
+        std::filebuf fb_binary;
+        std::string filename = path;
+        fb_binary.open(filename + "-binary.ply", std::ios::out | std::ios::binary);
+        std::ostream outstream_binary(&fb_binary);
+        if (outstream_binary.fail()) throw std::runtime_error("failed to open " + filename);
+        file.write(outstream_binary, true);
+    }
+}
+
+/**
+ * @brief 
+ * 
+ */
 namespace
 {
     template <class FloatType>
@@ -99,7 +174,7 @@ class GaussKernel : public Kernel<FloatType, dim>
         }
 
 
-        FloatType compute(const Kernel<FloatType, dim>::VectorType& x, const Kernel<FloatType, dim>::VectorType& y) override
+        FloatType compute(const Kernel<FloatType, dim>::VectorType& x, const Kernel<FloatType, dim>::VectorType& y) const override
         {
             return std::exp( -(x - y).dot(x - y) / (2 * h *h)); 
         }
@@ -108,6 +183,57 @@ class GaussKernel : public Kernel<FloatType, dim>
         FloatType h = 0.5;
 };
 
+template <class FloatType,  uint32_t dim>
+void calculateNystromApprox(const Kernel<FloatType,dim>& kernel, 
+                            const std::vector<Eigen::Vector<FloatType, dim>>& y,
+                            const uint32_t kSamples,
+                            Eigen::Matrix<FloatType, Eigen::Dynamic, Eigen::Dynamic>& eigenVectors,
+                            Eigen::DiagonalMatrix<FloatType,Eigen::Dynamic>& eigenValues
+                            )
+{
+    TimeTracker tr("calculateNystromApprox");
+
+    std::vector<uint32_t> indices(y.size());
+    for (int i = 0; i < y.size(); i++) {
+      indices[i] = i;
+    }
+
+    std::random_shuffle(indices.begin(), indices.end());
+
+
+    using MatrixType = Eigen::Matrix<FloatType, Eigen::Dynamic, Eigen::Dynamic>;
+    using DiagType = Eigen::DiagonalMatrix<FloatType,Eigen::Dynamic>;
+    MatrixType kernelMat(kSamples, kSamples);
+    for(uint32_t i = 0u; i < kSamples; i++)
+    {
+        for(uint32_t j = i; j < kSamples; j++)
+        {
+            kernelMat(i,j) = kernelMat(j,i) = kernel.compute(y[indices[i]], y[indices[j]]);
+        }
+    }
+
+    Eigen::JacobiSVD<MatrixType> svd(kernelMat,  Eigen::ComputeFullU | Eigen::ComputeFullV);
+    //Eigen::BDCSVD<MatrixType> svd(kernelMat,  Eigen::ComputeFullU | Eigen::ComputeFullV);
+    std::cout << "Its singular values are:" << std::endl << svd.singularValues() << std::endl;
+    auto U = svd.matrixU();
+    //auto V = svd.matrixV();
+
+    eigenValues.resize(kSamples);
+    eigenValues = (svd.singularValues()).asDiagonal();
+    eigenValues.diagonal().array() += 1.0e-10;
+
+    MatrixType kernelMxK(y.size(), kSamples);
+    for(uint32_t m = 0u; m < y.size(); m++)
+    {
+        for(uint32_t k = 0; k < kSamples; k++)
+        {
+            kernelMxK(m,k) = kernel.compute(y[m], y[indices[k]]);
+        }
+    }
+
+    eigenVectors.resize(y.size(), kSamples);
+    eigenVectors = kernelMxK * U * eigenValues.inverse();
+}
 
 /**
  * @brief 
@@ -165,10 +291,16 @@ inline void BCPD<FloatType, dim>::Compute()
 
     Initialization();
     
+    iter = 0u;
+    std::cout << "Iteration: " << iter << " residual is: " << residual << std::endl;
     while(residual > c_resError)
     {
+        TimeTracker tr("Iteration");
         ExpectationStep();
         MaximizationStep();
+        iter++;
+
+        std::cout << "Iteration: " << iter << " residual is: " << residual << std::endl;
     }
 
 
@@ -185,6 +317,7 @@ inline void BCPD<FloatType, dim>::Initialization()
     uint32_t N =  x.size();
     uint32_t M =  y.size();
 
+    TimeTracker tr("Initialization");
 
     //Initialize kernel
     m_kernel = std::make_unique<GaussKernel<FloatType, dim>>(m_beta);
@@ -230,6 +363,7 @@ inline void BCPD<FloatType, dim>::Initialization()
     FloatType val1 = FloatType(0.0);
     FloatType val2 = FloatType(0.0);
 
+#if 0
     for (uint32_t m = 0; m < M; m++)
     {
         for (uint32_t n = 0; n < N; n++)
@@ -237,14 +371,45 @@ inline void BCPD<FloatType, dim>::Initialization()
             residual += (x[n] - y[m]).dot(x[n] - y[m]);
         }
     }
+#else
+    for (uint32_t m = 0; m < M; m++)
+    {
+        residual += N * y[m].squaredNorm();
+    }
     
+    for (uint32_t n = 0; n < N; n++)
+    {
+        residual += M * x[n].squaredNorm();
+    }
+
+    for(uint32_t d = 0u; d < dim; d++)
+    {
+        FloatType sumY(0.0);
+         for (uint32_t m = 0; m < M; m++)
+        {
+            sumY += y[m][d];
+        }
+        
+        FloatType sumX(0.0);
+        for (uint32_t n = 0; n < N; n++)
+        {
+            sumX += x[n][d];
+        }   
+
+        residual -= 2* sumY * sumX;
+    }
+
+#endif
+
     residual *= (m_gamma * m_gamma)  / FloatType(M * N * dim);
 
     // sigma
+#if !NYSTROM
     sigma.resize(M,M);
     sigma.setIdentity();
+#endif
 
-
+#if !NYSTROM
     G.resize(M,M);
     /* G */
     for (uint32_t i = 0; i < M; i++)
@@ -255,8 +420,17 @@ inline void BCPD<FloatType, dim>::Initialization()
         }
     }
 
+#else
     // Create kd-tree.
     xKdTree = std::make_unique<kdTreeType>(dim /*dim*/, x, 10 /* max leaf */);
+
+    calculateNystromApprox<FloatType,dim>(*m_kernel, 
+                            y,
+                            kSamples, 
+                            Q,
+                            LAMBDA
+                            );
+#endif
 
 }
 
@@ -268,11 +442,264 @@ inline void BCPD<FloatType, dim>::Initialization()
 template <class FloatType, uint32_t dim>
 inline void BCPD<FloatType, dim>::ExpectationStep()
 {
+    TimeTracker tr("ExpectationStep");
+
     uint32_t N =  x.size();
     uint32_t M =  y.size();
 
     sigmaSQR = residual;
 
+
+    const uint32_t numVSamples = 2u *(vSamples / 2u);
+    const FloatType residualKDTree(0.2 * 0.2);
+#if NYSTROM
+
+    if(residual > residualKDTree)
+    {
+        std::cout << "Using nyström method to comput P: " << std::endl;
+
+        // x-indices
+        std::vector<uint32_t> indicesX(N);
+        for (int i = 0; i < N; i++) {
+        indicesX[i] = i;
+        }
+        std::random_shuffle(indicesX.begin(), indicesX.end());
+
+        // y-indices
+        std::vector<uint32_t> indicesY(M);
+        for (int i = 0; i < M; i++) {
+        indicesY[i] = i;
+        }
+        std::random_shuffle(indicesY.begin(), indicesY.end());
+
+        std::vector<VectorType> v(numVSamples);
+        const uint32_t sampleCount = numVSamples / 2u;
+        for (int i = 0; i < sampleCount; i++) 
+        {
+            v[2*i] = x[indicesX[i]];
+            v[2*i+1] = y_hat[indicesY[i]];
+        }
+
+        EigenMatrix kernelVxV(numVSamples, numVSamples);
+        for(uint32_t i = 0u; i < numVSamples; i++)
+        {
+            for(uint32_t j = i; j < numVSamples; j++)
+            {
+                kernelVxV(i,j) = kernelVxV(j,i) = std::exp(-(v[i] - v[j]).squaredNorm() / (2.0 * residual));
+            }
+        }
+
+        // Kernel XxV
+        EigenMatrix kernelXxV(N, numVSamples);
+        for(uint32_t n = 0u; n < N; n++)
+        {
+            for(uint32_t k = 0; k < numVSamples; k++)
+            {
+                kernelXxV(n,k) = std::exp(-(x[n] - v[k]).squaredNorm() / (2.0 * residual));
+            }
+        }
+
+        EigenMatrix kernelVxX = kernelVxV.inverse() * kernelXxV.transpose();
+
+        EigenMatrix kernelYxV(M, numVSamples);
+        for(uint32_t m = 0u; m < M; m++)
+        {
+            for(uint32_t k = 0; k < numVSamples; k++)
+            {
+                kernelYxV(m,k) = std::exp(-(y_hat[m] - v[k]).squaredNorm() / (2.0 * residual));
+            }
+        }
+
+        // b-vector
+        std::vector<FloatType> b(M);
+        for(uint32_t m = 0u; m < M; m++)
+        {
+            
+            b[m] = alpha[m] * std::exp(- std::pow(scale, 2.0) / (2.0 * residual) * FloatType(dim) /* sigma(m,m)*/); 
+            assert(b[m] != FloatType(0.0));
+        }
+
+        // TODO: c-vector is always zero, because omega is currently zero.
+
+        std::vector<FloatType> qV(numVSamples);        
+        for(uint32_t k = 0; k < numVSamples; k++)
+        {
+            for(uint32_t m = 0u; m < M; m++)    
+            {
+                qV[k] += kernelYxV(m,k) * b[m];
+            }
+        }
+
+        std::vector<FloatType> q(M);
+        for(uint32_t n = 0u; n < N; n++)
+        {
+            for(uint32_t k = 0; k < numVSamples; k++)  
+            {
+                q[n] += kernelVxX(k,n) * qV[k];
+            }
+        }
+        for(uint32_t n = 0u; n < N; n++)
+        {
+            q[n] = 1.0 / q[n];
+        }
+
+        // Update nu, N_hat.
+        nu.resize(M);
+        N_hat = 0.0;  
+        std::vector<FloatType> nuV(numVSamples);  
+        for(uint32_t k = 0; k < numVSamples; k++)  
+        {
+            nuV[k] = FloatType(0.0);
+            for(uint32_t n = 0u; n < N; n++)
+            {
+                nuV[k] += kernelVxX(k,n) * q[n];
+            }
+        }
+
+        for (uint32_t m = 0u; m < M; m++)
+        {
+            nu[m] = FloatType(0.0);
+            for(uint32_t k = 0; k < numVSamples; k++)  
+            {
+                nu[m] += kernelYxV(m,k) * nuV[k];
+            }
+            nu[m] *= b[m];
+            N_hat += nu[m];
+        }
+
+        // Update nu_apo
+        nu_apo.assign(N, FloatType(0.0));
+        for(uint32_t n = 0u; n < N; n++)
+        {
+            nu_apo[n] = FloatType(1.0);
+        }
+
+        // Compute Px
+        std::vector<VectorType> PxV(numVSamples);  
+        for(uint32_t k = 0; k < numVSamples; k++)  
+        {
+            PxV[k] = VectorType::Zero();
+            for(uint32_t n = 0u; n < N; n++)
+            {
+                PxV[k] += kernelVxX(k,n) * q[n] * x[n];
+            }
+        }
+
+        Px.resize(M);
+        for (uint32_t m = 0u; m < M; m++)
+        {
+            Px[m] = VectorType::Zero();
+            for(uint32_t k = 0; k < numVSamples; k++)  
+            {
+                Px[m] += kernelYxV(m,k) * PxV[k];
+            }
+            Px[m] *= b[m];
+        }
+
+        // Calculate x_hat
+        x_hat.resize(M);
+        for (uint32_t m = 0u; m < M; m++)
+        {
+            x_hat[m] = Px[m] / nu[m];
+        }
+
+    }
+    else
+    {
+        std::cout << "Using kd-tree method to comput P: " << std::endl;
+
+        FloatType search_radius = FloatType(5.0) * std::sqrt(residual);
+        search_radius = std::min(search_radius, 0.1);
+
+        // Calculate P using kdTree.
+        std::vector<std::vector<std::pair<std::size_t,FloatType>>> P_kd(M);
+        for (uint32_t m = 0u; m < M; m++)
+        {
+            const VectorType& y_hat_m = y_hat[m];
+
+            std::vector<nanoflann::ResultItem<std::size_t, FloatType>> ret_matches;
+            const size_t nMatches =
+                xKdTree->radiusSearch(y_hat_m.data(), search_radius, ret_matches);
+
+            if(ret_matches.empty())
+            {
+                std::size_t                num_results = 5;
+                std::vector<std::size_t> ret_index(num_results);
+                std::vector<FloatType>    out_dist_sqr(num_results);
+
+                xKdTree->query(
+                            y_hat_m.data(), num_results, &ret_index[0], &out_dist_sqr[0]);
+
+                for(uint32_t i = 0u; i < num_results; i++)
+                {
+                    ret_matches.emplace_back(ret_index[i], out_dist_sqr[i]);
+                }
+
+                std::cout << "No mathes were found at m=: " << m << std::endl;
+            }
+
+            for(const auto& xNeighbor : ret_matches)
+            {
+                // calculate p_mn
+                FloatType p_mn = calculateP(xNeighbor.second, residual, FloatType(1.0), alpha[m], m_omega);
+                P_kd[m].push_back(std::make_pair(xNeighbor.first, p_mn));
+            }
+        }
+
+        std::vector<FloatType> sumP(N,FloatType(0.0));
+        for (uint32_t m = 0u; m < M; m++)
+        {
+            for(const auto& p : P_kd[m])
+            {
+                sumP[p.first] += p.second;
+            }
+        }
+
+        for (uint32_t m = 0u; m < M; m++)
+        {
+            for(auto& p : P_kd[m])
+            {
+                p.second /= sumP[p.first];
+            }
+        }
+
+        // Update nu, N_hat.
+        nu.resize(M);
+        nu_apo.assign(N, FloatType(0.0));
+        N_hat = 0.0;
+        for (uint32_t m = 0u; m < M; m++)
+        {
+            FloatType sumP = 0.0;
+            for(const auto p : P_kd[m])
+            {
+                nu_apo[p.first] += p.second;
+                sumP += p.second;
+            }
+            nu[m] = sumP;
+            N_hat += sumP;
+        }
+
+        // x_hat
+        Px.resize(M);
+        x_hat.resize(M);
+        for (uint32_t m = 0u; m < M; m++)
+        {
+            Px[m] = VectorType::Zero();
+            for(const auto p : P_kd[m])
+            {
+                Px[m] += p.second * x[p.first];
+            }
+
+            if(nu[m] == FloatType(0.0))
+            {
+                std::cout << "Is nan at m=: " << m << std::endl;
+            }
+
+            x_hat[m] = Px[m] / nu[m];
+        }
+    }
+
+#else 
     P.resize(N);
     for (uint32_t n = 0u; n < N; n++)
     {
@@ -304,52 +731,6 @@ inline void BCPD<FloatType, dim>::ExpectationStep()
         }
     }
 
-    // Calculate P using kdTree.
-    std::vectorP.resize(N);
-    for (uint32_t m = 0u; m < M; m++)
-    {
-        const VectorType& y_hat_m = y_hat[m];
-
-        std::vector<nanoflann::ResultItem<std::size_t, FloatType>> ret_matches;
-        FloatType search_radius = FloatType(10 * 10) * residual;
-const size_t nMatches =
-            xKdTree->radiusSearch(y_hat_m.data(), search_radius, ret_matches);
-
-        for(const auto& xNeighbor : ret_matches)
-        {
-                        // calculate p_mn
-            FloatType p_mn = calculateP(xNeighbor.second, residual, sigma(m,m), alpha[m], m_omega);
-        }
-    }
-
-#if 0
-    // Debug, stupid identiy matrix simulate ICP.
-    for (uint32_t n = 0u; n < N; n++)
-    {
-        FloatType sum_p_mn = 0.0;
-        for (uint32_t m = 0u; m < M; m++)
-        {
-            P[n][m] = std::exp( -(x[n] - y_hat[m]).squaredNorm() / (2.0 * sigmaSQR) );
-            sum_p_mn += P[n][m];
-        }
-
-        // divide p_mn by the sum.
-        for (uint32_t m = 0u; m < M; m++)
-        {
-            P[n][m] /= omega * p_out + sum_p_mn;
-        }
-    }
-#endif
-
-
-        // divide p_mn by the sum.
-        for (uint32_t m = 0u; m < M; m++)
-        {
-            std::cout << "P(" << m << "," << m << "): " << P[m][m] << std::endl;
-        }
-
-
-
     // Update nu, N_hat.
     nu.resize(M);
     nu_apo.assign(N, FloatType(0.0));
@@ -379,11 +760,14 @@ const size_t nMatches =
         x_hat[m] = x_hat_m / nu[m];
     }
 
+#endif
+
     // alpha
     for (uint32_t m = 0u; m < M; m++)
     {
         alpha[m] = std::exp(digamma(m_kappa + nu[m]) - digamma(m_kappa * M + N_hat));
     }
+
 }
 
 /**
@@ -394,6 +778,8 @@ const size_t nMatches =
 template <class FloatType, uint32_t dim>
 inline void BCPD<FloatType, dim>::MaximizationStep()
 {
+    TimeTracker tr("MaximizationStep");
+
     uint32_t N =  x.size();
     uint32_t M =  y.size();
 
@@ -408,6 +794,47 @@ inline void BCPD<FloatType, dim>::MaximizationStep()
     // Compute sigma.
     FloatType cc = std::pow(scale, 2.0) / residual;
 
+#if NYSTROM
+    Eigen::Vector<FloatType, Eigen::Dynamic> nuVec(M);
+    for (uint32_t j = 0u; j < M; j++)
+    {
+        nuVec[j] = nu[j];
+    }
+    EigenMatrix S = Q.transpose() * nuVec.asDiagonal() * Q;
+
+    EigenMatrix sigmaKxK = S;
+    sigmaKxK += m_lambda / cc * LAMBDA.inverse();
+    EigenMatrix sigmaDebug = S * sigmaKxK.inverse();
+    sigmaKxK = (EigenMatrix::Identity(kSamples, kSamples) - S * sigmaKxK.inverse());
+    sigmaKxK = LAMBDA * (sigmaKxK) / m_lambda;
+    //sigmaKxK = LAMBDA * (EigenMatrix::Identity(kSamples, kSamples) - S * sigmaKxK.inverse()) / m_lambda;
+
+    EigenMatrix sigmaKxM = sigmaKxK * Q.transpose();
+
+
+    // Compute v_hat.
+    std::vector<VectorType> v_hatK(kSamples);
+    for (uint32_t i = 0u; i < kSamples; i++)
+    {
+        v_hatK[i] = VectorType::Zero();
+        for (uint32_t j = 0u; j < M; j++)
+        {
+            v_hatK[i] += cc * sigmaKxM(i,j) * nu[j] * E[j];
+        }
+    }
+
+    // Compute v_hat.
+    std::vector<VectorType> v_hat(M);
+    for (uint32_t i = 0u; i < M; i++)
+    {
+        v_hat[i] = VectorType::Zero();
+        for (uint32_t j = 0u; j < kSamples; j++)
+        {
+            v_hat[i] += Q(i,j) * v_hatK[j];
+        }
+    }
+
+#else
     std::vector<FloatType> diagMat(M);
     for (uint32_t i = 0u; i < M; i++)
     {
@@ -461,7 +888,7 @@ inline void BCPD<FloatType, dim>::MaximizationStep()
 
     std::cout << "sigma ref is: " << std::endl << sigmaRef << std::endl;
 
-#endif
+#endif 
 
     // Compute v_hat.
     std::vector<VectorType> v_hat(M);
@@ -473,27 +900,7 @@ inline void BCPD<FloatType, dim>::MaximizationStep()
             v_hat[i] += cc * sigma(i,j) * nu[j] * E[j];
         }
     }
-
-    // In debug mode calculate ref v.
-#ifndef NDEBUG
-    std::cout << "sigma is:" << std::endl << sigma << std::endl;
-    
-    //auto A = Diag.inverse() / lambda + G;
-    //A.colPivHouseholderQr().solve(E);
-
-    EigenMatrix A = sigma * Diag;
-
-    std::vector<VectorType> v_hatRef(M);
-    for (uint32_t i = 0u; i < M; i++)
-    {
-        v_hatRef[i] = VectorType::Zero();
-        for (uint32_t j = 0u; j < M; j++)
-        {
-            v_hatRef[i] += A(i,j) * E[j];
-        }
-    }
-
-#endif
+#endif // NYSTROM
 
     // Update u_hat.
     std::vector<VectorType> u_hat(M);
@@ -501,6 +908,8 @@ inline void BCPD<FloatType, dim>::MaximizationStep()
     {
         u_hat[i] = y[i] + v_hat[i];
     }
+
+    std::cout << "u_hat computed" << std::endl;
 
     // Update s,R,t and residual.
     /* ------------------------------------------------------------------------------------- */
@@ -513,14 +922,16 @@ inline void BCPD<FloatType, dim>::MaximizationStep()
     }
     x_avg /= N_hat;
 
-    // r_avg
+#if 0
+    // sigma_avg
     FloatType sigma_avg(0.);
     for (uint32_t i = 0u; i < M; i++)
     {
         sigma_avg += nu[i] * sigma(i,i);
-        std::cout << "sigma(" << i << "," << i << "): " << sigma(i,i) << std::endl;
+        //std::cout << "sigma(" << i << "," << i << "): " << sigma(i,i) << std::endl;
     }
     sigma_avg /= N_hat;
+#endif
 
     // u_avg
     VectorType u_avg = VectorType::Zero();
@@ -549,18 +960,15 @@ inline void BCPD<FloatType, dim>::MaximizationStep()
 
     // R
     Eigen::JacobiSVD<MatrixType, Eigen::ComputeFullU | Eigen::ComputeFullV> svd(Sxu,  Eigen::ComputeFullU | Eigen::ComputeFullV);
-    std::cout << "Its singular values are:" << std::endl << svd.singularValues() << std::endl;
+    std::cout << "Sxu's singular values are:" << std::endl << svd.singularValues() << std::endl;
     auto U = svd.matrixU();
     auto V = svd.matrixV();
 
     MatrixType R_diag = MatrixType::Identity();
     R_diag(dim- 1u, dim - 1u) = (U * V.transpose()).determinant();
-
     rotation = U * R_diag * V.transpose();
-    //rotation.transposeInPlace();
 
     std::cout << "Det rot matrix: " << rotation.determinant() << std::endl;
-
 
     // scale
     scale = 0.0;
@@ -577,46 +985,67 @@ inline void BCPD<FloatType, dim>::MaximizationStep()
     }
 
     // Update residual.
+#if NYSTROM
+
     residual = FloatType(0.0);
     for(uint32_t i = 0u; i < N; i++)
     {
-        residual += nu_apo[i] * x[i].dot(x[i]);
+        residual += nu_apo[i] * x[i].squaredNorm();
     }
 
     for (uint32_t i = 0u; i < M; i++)
     {
-        VectorType row = VectorType::Zero();
-        for (uint32_t j = 0; j < N; j++)
-        {
-            row += P[j][i] * x[j];
-        }
-        residual -= FloatType(2.0) * row.dot(y_hat[i]);
+        residual -= FloatType(2.0) * Px[i].dot(y_hat[i]);
     }
 
     for(uint32_t i = 0u; i < M; i++)
     {
-        residual += nu[i] * y_hat[i].dot(y_hat[i]);
+        residual += nu[i] * y_hat[i].squaredNorm();
     }
-
 
     residual = residual / (FloatType(dim) * N_hat);
     //resudual += std::pow(scale, 2.0) * sigma_avg;
 
-    // Debug
-    FloatType residualDebug = 0.0;
+#else
+    residual = 0.0;
     for (uint32_t i = 0u; i < M; i++)
     {
         for (uint32_t j = 0; j < N; j++)
         {
-            residualDebug += P[j][i] * (y_hat[i] - x[j]).squaredNorm();
+            residual += P[j][i] * (y_hat[i] - x[j]).squaredNorm();
         }
     }
-    residualDebug /= FloatType(dim) * N_hat;
+    residual /= FloatType(dim) * N_hat;
     //residualDebug += std::pow(scale, 2.0) * sigma_avg;
 
     residual = residualDebug;
+#endif
 
 
+
+#if WRITE_DEBUG_OUTPUT
+
+    std::string folder = "Iteration_" + std::to_string(iter);
+
+    std::filesystem::create_directories(outputDir / folder);
+
+    // write x-hat
+    auto x_Path = outputDir / folder / "x.ply";
+    writePly<FloatType,dim>(x, x_Path);
+
+     auto x_hatPath = outputDir / folder / "x_hat.ply";
+    writePly<FloatType,dim>(x_hat, x_hatPath);
+
+     auto yPath = outputDir / folder / "y.ply";
+    writePly<FloatType,dim>(y, yPath);
+
+     auto y_hatPath = outputDir / folder / "y_hat.ply";
+    writePly<FloatType,dim>(y_hat, y_hatPath);
+#endif
+
+#ifndef NDEBUG 
+
+#if PRINT_DEBUG
     // Debug output.
     std::cout << std::endl;
     for(uint32_t i = 0u; i < M; i++)
@@ -629,8 +1058,9 @@ inline void BCPD<FloatType, dim>::MaximizationStep()
     {
         std::cout << "y_hat[" << i << "]: " << y_hat[i][0] << ", " << y_hat[i][1] << std::endl;
     }
+#endif
 
-    #ifndef NDEBUG 
+#if VISUALIZE // Visualize output.
     CvPlot::Axes axes = CvPlot::makePlotAxes();
 
     auto addPlots = [](const std::vector<VectorType>& points, CvPlot::Axes& axesPlot, std::string_view plotType)
@@ -654,10 +1084,11 @@ inline void BCPD<FloatType, dim>::MaximizationStep()
     //addPlots(u_hat, axes, "oy");
     
     CvPlot::show("xPoints", axes);
+#endif
 
-    #endif
+#endif
     
-    }
+}
 
 
 //template class BCPD<float>;

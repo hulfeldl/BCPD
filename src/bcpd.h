@@ -22,7 +22,7 @@ class Kernel
     public:
         using VectorType = Eigen::Vector<FloatType, dim>; 
 
-        virtual FloatType compute(const VectorType& x, const VectorType& y) = 0;
+        virtual FloatType compute(const VectorType& x, const VectorType& y) const = 0;
 };
 
 /**
@@ -82,6 +82,8 @@ class BCPD
         void MaximizationStep();
 
     private:
+        uint32_t iter = 0u;
+
         // Tuning parameters.
         FloatType m_beta = FloatType(2.0);
         FloatType m_lambda = FloatType(2.0);
@@ -89,6 +91,9 @@ class BCPD
 
         FloatType m_gamma = FloatType(1.0);        
         FloatType m_kappa = FloatType(1e9);
+
+        const uint32_t kSamples = 150u; // G
+        const uint32_t vSamples = 300u; // P
 
         // Input Point Clouds.
         std::vector<VectorType> x; // target point cloud
@@ -105,7 +110,10 @@ class BCPD
         FloatType residual;
 
         // Initialization.
-         EigenMatrix G;
+        EigenMatrix G;
+        EigenMatrix Q;
+        Eigen::DiagonalMatrix<FloatType,Eigen::Dynamic> LAMBDA;
+
         FloatType sigmaSQR;
         FloatType p_out = FloatType(0.0);
         std::vector<FloatType> alpha;
@@ -115,6 +123,7 @@ class BCPD
         // Expectation setp.
         std::vector<FloatType> sgm;
         std::vector<std::vector<FloatType>> P;
+        std::vector<VectorType> Px;  
         std::vector<FloatType> nu;
         std::vector<FloatType> nu_apo;
         FloatType N_hat;

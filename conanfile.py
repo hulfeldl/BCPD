@@ -16,7 +16,7 @@ class bcpdRecipe(ConanFile):
     # Binary configuration
     settings = "os", "compiler", "build_type", "arch"
     options = {"shared": [True, False], "fPIC": [True, False]}
-    default_options = {"shared": False, "fPIC": True}
+    default_options = {"shared": False, "fPIC": False}
 
     # Sources are located in the same place as this recipe, copy them to the recipe
     exports_sources = "CMakeLists.txt", "src/*", "include/*"
@@ -34,8 +34,10 @@ class bcpdRecipe(ConanFile):
     def requirements(self):
         self.requires("catch2/3.4.0")
         self.requires("eigen/3.4.0")
-        self.requires("cvplot/1.2.2")
-        self.requires("xz_utils/5.4.4", override=True)
+        self.requires("tinyply/2.3.4")
+        if self.settings.build_type == "Debug":
+            self.requires("cvplot/1.2.2")
+            self.requires("xz_utils/5.4.4", override=True)
 
     def system_requirements(self):
         apt = Apt(self)
@@ -48,6 +50,7 @@ class bcpdRecipe(ConanFile):
 
         tc = CMakeToolchain(self)
         tc.user_presets_path = "ConanPresets.json"
+        tc.variables["GENERAL_BUILD_LIBS_POSITION_INDEPENDENT"] = True
         tc.generate()
 
     def build(self):
