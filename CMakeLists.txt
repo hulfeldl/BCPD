@@ -1,3 +1,9 @@
+cmake_minimum_required(VERSION 4.0)
+
+if(EXISTS "${CMAKE_BINARY_DIR}/conan_toolchain.cmake")
+    include("${CMAKE_BINARY_DIR}/conan_toolchain.cmake")
+endif()
+
 #
 #
 #
@@ -25,3 +31,7 @@ enable_testing()
 
 add_subdirectory(src)
 add_subdirectory(tests)
+find_package(fmt REQUIRED)
+find_package(spdlog REQUIRED)
+add_subdirectory(external/cmake)
+target_link_libraries(BCPD PRIVATE KiSyncLib fmt::fmt spdlog::spdlog)
