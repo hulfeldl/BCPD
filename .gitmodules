@@ -1,0 +1,3 @@
+[submodule "cmake/kisync"]
+	path = cmake/kisync
+	url = https://github.com/Prometheus-Lorenz/KiSync-cmake.git
