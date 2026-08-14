@@ -14,7 +14,7 @@
 int main()
 {
 
-    BCPD<double> bcpd;
+    BCPD<double, 3> bcpd(1.0, 1.0, 0.1, 1.0);
     bcpd.Compute();
     bcpd.Compute();
 }
