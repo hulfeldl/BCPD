@@ -1,3 +1,4 @@
+#include <random>
 /**
  * @file bcpd.cpp
  * @author your name (you@domain.com)
@@ -198,7 +199,7 @@ void calculateNystromApprox(const Kernel<FloatType,dim>& kernel,
       indices[i] = i;
     }
 
-    std::random_shuffle(indices.begin(), indices.end());
+    std::shuffle(indices.begin(), indices.end(), std::mt19937{std::random_device{}()});
 
 
     using MatrixType = Eigen::Matrix<FloatType, Eigen::Dynamic, Eigen::Dynamic>;
@@ -463,14 +464,14 @@ inline void BCPD<FloatType, dim>::ExpectationStep()
         for (int i = 0; i < N; i++) {
         indicesX[i] = i;
         }
-        std::random_shuffle(indicesX.begin(), indicesX.end());
+        std::shuffle(indicesX.begin(), indicesX.end(), std::mt19937{std::random_device{}()});
 
         // y-indices
         std::vector<uint32_t> indicesY(M);
         for (int i = 0; i < M; i++) {
         indicesY[i] = i;
         }
-        std::random_shuffle(indicesY.begin(), indicesY.end());
+        std::shuffle(indicesY.begin(), indicesY.end(), std::mt19937{std::random_device{}()});
 
         std::vector<VectorType> v(numVSamples);
         const uint32_t sampleCount = numVSamples / 2u;
