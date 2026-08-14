@@ -1,5 +1,5 @@
 from conan import ConanFile
-from conan.tools.cmake import CMakeToolchain, CMakeDeps, CMake, cmake_layout
+from conan.tools.cmake import CMakeToolchain, CMakeDeps, cmake_layout
 
 class BCPDConan(ConanFile):
     name = "bcpd"
@@ -9,8 +9,7 @@ class BCPDConan(ConanFile):
     def requirements(self):
         self.requires("catch2/3.5.0")
         self.requires("spdlog/1.14.1")
-        self.requires("nanoflann/1.9.0")
-        self.requires("tinyply/2.3.4")
+        self.requires("nanoflann/1.4.3")
 
     def generate(self):
         tc = CMakeToolchain(self)
