@@ -1,47 +1,21 @@
 {
-    "version": 4,
-    "include": ["./ConanPresets.json"],
-    "configurePresets": [
-      {
-        "name": "default",
-        "displayName": "multi config",
-        "inherits": "conan-default"
+  "version": 4,
+  "configurePresets": [
+    {
+      "name": "default",
+      "displayName": "Default",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
       },
-      {
-        "name": "release",
-        "displayName": "release",
-        "inherits": "conan-release"
-      },
-      {
-        "name": "debug",
-        "displayName": "debug",
-        "inherits": "conan-debug"
-      }
-    ],
-    "buildPresets": [
-      {
-        "name": "multi-release",
-        "configurePreset": "default",
-        "configuration": "Release",
-        "inherits": "conan-release"
-      },
-      {
-        "name": "multi-debug",
-        "configurePreset": "default",
-        "configuration": "Debug",
-        "inherits": "conan-debug"
-      },
-      {
-        "name": "release",
-        "configurePreset": "release",
-        "configuration": "Release",
-        "inherits": "conan-release"
-      },
-      {
-        "name": "debug",
-        "configurePreset": "debug",
-        "configuration": "Debug",
-        "inherits": "conan-debug"
-      }
-    ]
-  }
+      "binaryDir": "${sourceDir}/build"
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "release",
+      "configurePreset": "default",
+      "jobs": 0
+    }
+  ]
+}
