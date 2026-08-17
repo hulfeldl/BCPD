@@ -1,23 +1,28 @@
 cmake_minimum_required(VERSION 4.0)
 project(BCPD)
-
 add_subdirectory(cmake/kisync)
 
-find_package(Catch2 REQUIRED)
+# Make Catch2 optional
+find_package(Catch2 QUIET)
+
 find_package(spdlog REQUIRED)
 find_package(nanoflann REQUIRED)
 find_package(tinyply REQUIRED)
 
-add_executable(bcpd 
+add_executable(bcpd
     src/main.cpp
     src/bcpd.cpp
     src/kd-tree.cpp
 )
 
-target_link_libraries(bcpd PRIVATE 
-    Catch2::Catch2WithMain 
+target_link_libraries(bcpd PRIVATE
     spdlog::spdlog
     nanoflann::nanoflann
     tinyply::tinyply
 )
+
+if(Catch2_FOUND)
+    target_link_libraries(bcpd PRIVATE Catch2::Catch2WithMain)
+endif()
+
 target_include_directories(bcpd PRIVATE src)
