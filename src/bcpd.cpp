@@ -20,7 +20,7 @@
 #include <filesystem>
 #include <source_location>
 #include <cassert>
-#include "nanoflann.hpp"
+#include <nanoflann.hpp>
 #include "tinyply.h"
 
 #ifndef NDEBUG
