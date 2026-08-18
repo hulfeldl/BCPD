@@ -11,9 +11,11 @@ find_package(tinyply REQUIRED)
 
 add_executable(bcpd
     src/main.cpp
-    src/bcpd.cpp
-    src/kd-tree.cpp
+    bcpd.cpp
 )
+
+target_compile_features(bcpd PRIVATE cxx_std_23)
+target_compile_options(bcpd PRIVATE -Wall -Wextra -Wpedantic)
 
 target_link_libraries(bcpd PRIVATE
     spdlog::spdlog
@@ -25,4 +27,4 @@ if(Catch2_FOUND)
     target_link_libraries(bcpd PRIVATE Catch2::Catch2WithMain)
 endif()
 
-target_include_directories(bcpd PRIVATE src)
+target_include_directories(bcpd PRIVATE src .)

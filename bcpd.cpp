@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include <random>
 #include <chrono>
 #include <iostream>
@@ -14,8 +15,8 @@
 #include <numeric>
 
 #include "bcpd.h"
-#include "nanoflann.hpp"
-#include "tinyply.h"
+#include <nanoflann.hpp>
+#include <tinyply.h>
 
 #ifndef NDEBUG
     #include <CvPlot/cvplot.h>
@@ -27,7 +28,11 @@
 #define PRINT_DEBUG 0
 
 namespace {
-    constexpr std::string_view OUTPUT_DIR = "/home/hulfeldl/DebugOutput/3D/armadillo/";
+    inline std::filesystem::path getDebugOutputDir() {
+        if (const char* envDir = std::getenv("BCPD_DEBUG_DIR")) { return envDir; }
+        return "./debug_output";
+    }
+    const std::filesystem::path OUTPUT_DIR = getDebugOutputDir();
     constexpr float RESIDUAL_CONVERGENCE_THRESHOLD = 0.001f;
     constexpr float RESIDUAL_KDTREE_THRESHOLD = 0.04f;
     constexpr float SEARCH_RADIUS_SCALE = 5.0f;
@@ -400,8 +405,8 @@ void BCPD<FloatType, Dim>::computeExpectationKdTree(uint32_t N, uint32_t M) {
     std::cout << "Using kd-tree method for P computation\n";
 
     const FloatType searchRadius = std::min(
-        SEARCH_RADIUS_SCALE * std::sqrt(residual), 
-        SEARCH_RADIUS_MAX
+        static_cast<FloatType>(SEARCH_RADIUS_SCALE) * std::sqrt(residual), 
+        static_cast<FloatType>(SEARCH_RADIUS_MAX)
     );
 
     std::vector<std::vector<std::pair<std::size_t, FloatType>>> P_kd(M);
@@ -559,7 +564,7 @@ void BCPD<FloatType, Dim>::computeMaximizationNystrom(uint32_t M, FloatType cc,
     }
     
     const EigenMatrix S = Q.transpose() * nuVec.asDiagonal() * Q;
-    EigenMatrix sigmaKxK = S + (m_lambda / cc) * LAMBDA.inverse();
+    EigenMatrix sigmaKxK = S + (m_lambda / cc) * EigenMatrix(LAMBDA.inverse());
     
     const EigenMatrix sigmaKxM = sigmaKxK.inverse() * Q.transpose();
 
@@ -694,7 +699,7 @@ void BCPD<FloatType, Dim>::updateResidual(uint32_t N, uint32_t M) {
 template <typename FloatType, uint32_t Dim>
 void BCPD<FloatType, Dim>::writeDebugOutput() const {
     const std::string folder = "Iteration_" + std::to_string(iter);
-    const auto iterDir = std::filesystem::path(OUTPUT_DIR.data()) / folder;
+    const auto iterDir = OUTPUT_DIR / folder;
     std::filesystem::create_directories(iterDir);
 
     writePly<FloatType, Dim>(x, iterDir / "x.ply");
