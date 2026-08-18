@@ -1,9 +1,9 @@
 /**
  * @file main.cpp
- * @author your name (you@domain.com)
+ * @author Lorenz Hulfeld (lorenz.hulfeld@gmail.com)
  * @brief 
- * @version 0.1
- * @date 2023-08-06
+ * @version 1.1.0
+ * @date 2024-2026
  * 
  * @copyright Copyright (c) 2023
  * 

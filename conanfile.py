@@ -9,7 +9,7 @@ class BCPDConan(ConanFile):
     def requirements(self):
         self.requires("catch2/3.5.0")
         self.requires("spdlog/1.14.1")
-        self.requires("nanoflann/1.4.3")
+        self.requires("nanoflann/1.9.0")
         self.requires("tinyply/2.3.4")
 
     def generate(self):
