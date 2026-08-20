@@ -34,3 +34,6 @@
 #build
 build/
 .pretty-printers/
+
+# IDE
+.idea/
