@@ -413,7 +413,7 @@ void BCPD<FloatType, Dim>::computeExpectationKdTree(uint32_t N, uint32_t M) {
     
     for (uint32_t m = 0u; m < M; ++m) {
         std::vector<nanoflann::ResultItem<std::size_t, FloatType>> ret_matches;
-        const size_t nMatches = xKdTree->radiusSearch(y_hat[m].data(), searchRadius, ret_matches);
+        xKdTree->radiusSearch(y_hat[m].data(), searchRadius, ret_matches);
 
         if (ret_matches.empty()) {
             std::vector<std::size_t> ret_index(NEAREST_NEIGHBORS_FALLBACK);

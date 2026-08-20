@@ -13,7 +13,7 @@
 #include <memory>
 #include <cstdint>
 #include <eigen3/Eigen/Dense>
-#include <KDTreeVectorOfVectorsAdaptor.h>
+#include <bcpd/KDTreeVectorOfVectorsAdaptor.h>
 
 template <class FloatType, uint32_t dim>
 class Kernel
