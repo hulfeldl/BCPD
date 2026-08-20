@@ -27,28 +27,3 @@ add_compile_options(
     $<$<COMPILE_LANGUAGE:CXX>:-Wextra>
     $<$<COMPILE_LANGUAGE:CXX>:-Wpedantic>
 )
-
-# Create bcpd executable
-add_executable(bcpd
-    src/main.cpp
-)
-
-target_include_directories(bcpd
-    PRIVATE
-        src
-)
-
-target_link_libraries(bcpd
-    PRIVATE
-        bcpd-bcpd
-        spdlog::spdlog
-        nanoflann::nanoflann
-        tinyply::tinyply
-)
-
-if(Catch2_FOUND)
-    target_link_libraries(bcpd
-        PRIVATE
-            Catch2::Catch2WithMain
-    )
-endif()
