@@ -9,7 +9,7 @@
  * 
  */
 
-#include "bcpd.h"
+#include <bcpd/bcpd.h>
 #include <catch2/catch_test_macros.hpp>
 #include <random>
 #include <numbers>
