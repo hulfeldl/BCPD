@@ -1,21 +1,46 @@
 {
-  "version": 4,
-  "configurePresets": [
-    {
-      "name": "default",
-      "displayName": "Default",
-      "generator": "Ninja",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release"
-      },
-      "binaryDir": "${sourceDir}/build"
-    }
-  ],
-  "buildPresets": [
-    {
-      "name": "release",
-      "configurePreset": "default",
-      "jobs": 0
-    }
-  ]
+    "version": 4,
+    "vendor": {
+        "conan": {}
+    },
+    "configurePresets": [
+        {
+            "name": "clang-release",
+            "displayName": "Clang Release",
+            "description": "Clang Release configuration",
+            "generator": "Unix Makefiles",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "/home/hulfeldl/.local/bin/clang",
+                "CMAKE_CXX_COMPILER": "/home/hulfeldl/.local/bin/clang++",
+                "CMAKE_BUILD_TYPE": "Release"
+            },
+            "binaryDir": "${sourceDir}/build/clang-release",
+            "toolchainFile": "${sourceDir}/build/generators-release/conan_toolchain.cmake"
+        },
+        {
+            "name": "clang-debug",
+            "displayName": "Clang Debug",
+            "description": "Clang Debug configuration",
+            "generator": "Unix Makefiles",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "/home/hulfeldl/.local/bin/clang",
+                "CMAKE_CXX_COMPILER": "/home/hulfeldl/.local/bin/clang++",
+                "CMAKE_BUILD_TYPE": "Debug"
+            },
+            "binaryDir": "${sourceDir}/build/clang-debug",
+            "toolchainFile": "${sourceDir}/build/generators-debug/conan_toolchain.cmake"
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "clang-release",
+            "configurePreset": "clang-release",
+            "jobs": 8
+        },
+        {
+            "name": "clang-debug",
+            "configurePreset": "clang-debug",
+            "jobs": 8
+        }
+    ]
 }

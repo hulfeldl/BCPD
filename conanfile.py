@@ -12,6 +12,9 @@ class BCPDConan(ConanFile):
         self.requires("nanoflann/1.9.0")
         self.requires("tinyply/2.3.4")
 
+    def configure(self):
+        self.settings.compiler.cppstd = "23"
+
     def generate(self):
         tc = CMakeToolchain(self)
         tc.generate()
@@ -20,4 +23,5 @@ class BCPDConan(ConanFile):
 
     def layout(self):
         self.folders.build = "build"
-        self.folders.generators = "build/generators"
+        build_type = str(self.settings.build_type).lower()
+        self.folders.generators = f"build/generators-{build_type}"
