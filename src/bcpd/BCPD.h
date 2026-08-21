@@ -1,12 +1,10 @@
 /**
- * @file bcpd.h
+ * @file Bcpd.h
  * @brief Bayesian Coherent Point Drift (BCPD) point cloud registration
- * @author Lorenz Hulfeld (lorenz.hulfeld@gmail.com)
- * @version 1.1.0
- * @date 2024-2026
  *
- * @copyright Copyright (c) 2024 Lorenz Hulfeld
+ * @author Lorenz Hulfeld (lorenz.hulfeld@gmail.com)
  */
+
 #pragma once
 
 #include <vector>
@@ -14,15 +12,7 @@
 #include <cstdint>
 #include <eigen3/Eigen/Dense>
 #include <bcpd/KDTreeVectorOfVectorsAdaptor.h>
-
-template <class FloatType, uint32_t dim>
-class Kernel
-{
-    public:
-        using VectorType = Eigen::Vector<FloatType, dim>; 
-        virtual ~Kernel() = default;
-        virtual FloatType compute(const VectorType& x, const VectorType& y) const = 0;
-};
+#include "Kernel.h"
 
 /**
  * @brief BCPD Algorithm Implementation

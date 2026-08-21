@@ -1,3 +1,10 @@
+/**
+ * @file Bcpd.cpp
+ * @brief Bayesian Coherent Point Drift (BCPD) point cloud registration implementation.
+ *
+ * @author Lorenz Hulfeld (lorenz.hulfeld@gmail.com)
+ */
+
 #include <cstdlib>
 #include <random>
 #include <chrono>
@@ -14,7 +21,8 @@
 #include <algorithm>
 #include <numeric>
 
-#include "bcpd.h"
+#include "BCPD.h"
+#include "GaussianKernel.h"
 #include <nanoflann.hpp>
 #include <tinyply.h>
 
@@ -113,21 +121,6 @@ namespace {
         return (1.0 - omega) * alpha * phi_mn;
     }
 }
-
-template <typename FloatType, uint32_t Dim>
-class GaussKernel : public Kernel<FloatType, Dim> {
-public:
-    explicit GaussKernel(FloatType beta) noexcept : h(beta) {}
-
-    [[nodiscard]] FloatType compute(
-        const typename Kernel<FloatType, Dim>::VectorType& x,
-        const typename Kernel<FloatType, Dim>::VectorType& y) const override {
-        return std::exp(-(x - y).dot(x - y) / (2.0 * h * h));
-    }
-
-private:
-    FloatType h = 0.5;
-};
 
 template <typename FloatType, uint32_t Dim>
 void calculateNystromApprox(

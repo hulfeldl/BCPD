@@ -6,8 +6,10 @@ set(LIB_NAME "${DIR_NAME}-${DIR_NAME}")
 
 # Add executable target with source files listed in SOURCE_FILES variable
 add_library(${LIB_NAME} STATIC
-        bcpd.cpp
-        bcpd.h
+        BCPD.cpp
+        BCPD.h
+        Kernel.h
+        GaussianKernel.h
         KDTreeVectorOfVectorsAdaptor.h
 )
 
