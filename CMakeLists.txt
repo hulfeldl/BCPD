@@ -29,3 +29,32 @@ add_compile_options(
 add_subdirectory(src)
 
 add_subdirectory(tests)
+
+# Format source code target
+find_program(CLANG_FORMAT_EXE clang-format)
+if(CLANG_FORMAT_EXE)
+    # Collect all source files
+    file(GLOB_RECURSE ALL_SOURCE_FILES
+        "src/**/*.cpp"
+        "src/**/*.h"
+        "src/**/*.hpp"
+        "src/**/*.inl"
+        "tests/**/*.cpp"
+        "tests/**/*.h"
+        "tests/**/*.hpp"
+    )
+
+    add_custom_target(format-sources
+        COMMAND ${CLANG_FORMAT_EXE} -i ${ALL_SOURCE_FILES}
+        COMMENT "Running clang-format on all source files..."
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    )
+
+    add_custom_target(format-check
+        COMMAND ${CLANG_FORMAT_EXE} --dry-run --Werror ${ALL_SOURCE_FILES}
+        COMMENT "Checking code formatting with clang-format..."
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    )
+else()
+    message(WARNING "clang-format not found. format-sources target will not be available.")
+endif()
