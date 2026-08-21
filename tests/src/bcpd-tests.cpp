@@ -7,59 +7,64 @@
 
 #include <bcpd/BCPD.h>
 #include <catch2/catch_test_macros.hpp>
-#include <random>
-#include <numbers>
-#include <fstream>
-#include <sstream>
+
 #include <filesystem>
+#include <fstream>
+#include <numbers>
+#include <random>
+#include <sstream>
 #include <stdexcept>
 
-namespace {
-    /**
-     * @brief Reads Eigen vectors from a text file
-     *
-     * @tparam FloatType Floating-point type for vector components (float, double, etc.)
-     * @tparam Dim Dimensionality of each vector
-     *
-     * @param filename Path to the input text file containing vector data
-     *
-     * @return std::vector<Eigen::Vector<FloatType, Dim>> Vector of read Eigen vectors
-     *
-     * @throws std::runtime_error If the file cannot be opened
-     *
-     * @details Each line in the input file should contain Dim whitespace-separated
-     * floating-point values representing a single vector component. This function
-     * reads line-by-line and constructs Eigen vectors from the parsed values.
-     *
-     * @note Extra values on a line beyond Dim are ignored
-     * @note Lines with fewer than Dim values will create incomplete vectors
-     */
-    template <class FloatType, uint32_t Dim>
-    std::vector<Eigen::Vector<FloatType, Dim>> readEigenVectorsFromTxtFile(
-        const std::filesystem::path& filename)
+namespace
+{
+/**
+ * @brief Reads Eigen vectors from a text file
+ *
+ * @tparam FloatType Floating-point type for vector components (float, double, etc.)
+ * @tparam Dim Dimensionality of each vector
+ *
+ * @param filename Path to the input text file containing vector data
+ *
+ * @return std::vector<Eigen::Vector<FloatType, Dim>> Vector of read Eigen vectors
+ *
+ * @throws std::runtime_error If the file cannot be opened
+ *
+ * @details Each line in the input file should contain Dim whitespace-separated
+ * floating-point values representing a single vector component. This function
+ * reads line-by-line and constructs Eigen vectors from the parsed values.
+ *
+ * @note Extra values on a line beyond Dim are ignored
+ * @note Lines with fewer than Dim values will create incomplete vectors
+ */
+template <class FloatType, uint32_t Dim>
+std::vector<Eigen::Vector<FloatType, Dim>> readEigenVectorsFromTxtFile(
+    const std::filesystem::path& filename)
+{
+    std::ifstream file(filename);
+    if (!file.is_open())
     {
-        std::ifstream file(filename);
-        if (!file.is_open()) {
-            throw std::runtime_error(std::string("Could not open file: ") + filename.string());
-        }
-
-        std::vector<Eigen::Vector<FloatType, Dim>> vectors;
-        std::string line;
-        while (std::getline(file, line)) {
-            std::istringstream iss(line);
-            Eigen::Vector<FloatType, Dim> vector;
-            FloatType value;
-            uint32_t i = 0u;
-            while (iss >> value && i < Dim) {
-                vector[i] = value;
-                ++i;
-            }
-            vectors.push_back(vector);
-        }
-
-        return vectors;
+        throw std::runtime_error(std::string("Could not open file: ") + filename.string());
     }
+
+    std::vector<Eigen::Vector<FloatType, Dim>> vectors;
+    std::string line;
+    while (std::getline(file, line))
+    {
+        std::istringstream iss(line);
+        Eigen::Vector<FloatType, Dim> vector;
+        FloatType value;
+        uint32_t i = 0u;
+        while (iss >> value && i < Dim)
+        {
+            vector[i] = value;
+            ++i;
+        }
+        vectors.push_back(vector);
+    }
+
+    return vectors;
 }
+}  // namespace
 
 /**
  * @test 2D square test
@@ -91,7 +96,8 @@ TEST_CASE("2D square test", "[bcpd]")
     const VectorType translation{0.01, 0.02};
     std::vector<VectorType> y;
     y.reserve(x.size());
-    for (const auto& point : x) {
+    for (const auto& point : x)
+    {
         y.emplace_back(point + translation);
     }
 
@@ -132,7 +138,8 @@ TEST_CASE("2D circle and ellipse", "[bcpd]")
 
     std::vector<VectorType> x;
     x.reserve(num_points);
-    for (uint32_t i = 0u; i < num_points; ++i) {
+    for (uint32_t i = 0u; i < num_points; ++i)
+    {
         const FloatType angle = angle_step * static_cast<FloatType>(i);
         x.emplace_back(std::cos(angle), std::sin(angle));
     }
@@ -142,7 +149,8 @@ TEST_CASE("2D circle and ellipse", "[bcpd]")
 
     std::vector<VectorType> y;
     y.reserve(x.size());
-    for (const auto& point : x) {
+    for (const auto& point : x)
+    {
         y.emplace_back(shear_mat * point + translation);
     }
 
@@ -184,29 +192,27 @@ TEST_CASE("3D circle and ellipse", "[bcpd]")
 
     std::vector<VectorType> x;
     x.reserve(num_x);
-    for (uint32_t i = 0u; i < num_x; ++i) {
+    for (uint32_t i = 0u; i < num_x; ++i)
+    {
         const FloatType u = static_cast<FloatType>(i) / static_cast<FloatType>(num_x);
         const FloatType angle = 2.0 * std::numbers::pi * u;
 
-        for (uint32_t j = 0u; j < num_y; ++j) {
+        for (uint32_t j = 0u; j < num_y; ++j)
+        {
             const FloatType v = static_cast<FloatType>(j) / static_cast<FloatType>(num_y);
             const FloatType phi = std::acos(2.0 * v - 1.0);
-            x.emplace_back(
-                std::cos(angle) * std::cos(phi),
-                std::sin(angle) * std::cos(phi),
-                std::sin(phi)
-            );
+            x.emplace_back(std::cos(angle) * std::cos(phi), std::sin(angle) * std::cos(phi),
+                           std::sin(phi));
         }
     }
 
     const VectorType translation{0.1, 0.2, 0.4};
-    const MatrixType shear_mat{{1.1, 0.3, 0.2},
-                               {-0.5, 0.8, 0.1},
-                               {-0.2, -0.3, 0.9}};
+    const MatrixType shear_mat{{1.1, 0.3, 0.2}, {-0.5, 0.8, 0.1}, {-0.2, -0.3, 0.9}};
 
     std::vector<VectorType> y;
     y.reserve(x.size());
-    for (const auto& point : x) {
+    for (const auto& point : x)
+    {
         y.emplace_back(shear_mat * point + translation);
     }
 
