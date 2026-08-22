@@ -1,6 +1,6 @@
 ---
 Language: Cpp
-Standard: c++20
+Standard: Latest
 
 # Indentation
 IndentWidth: 4
@@ -84,6 +84,6 @@ AccessModifierOffset: -4
 FixNamespaceComments: true
 SortIncludes: CaseSensitive
 SortUsingDeclarations: true
-NamespaceIndentation: None
+NamespaceIndentation: All
 IndentPPDirectives: AfterHash
 ...
