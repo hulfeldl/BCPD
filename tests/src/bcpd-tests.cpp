@@ -20,53 +20,53 @@ namespace
     /// Test data dir relative to repo.
     const auto testDataDir = std::filesystem::path(BCPD_TEST_DATA_DIR);
 
-/**
- * @brief Reads Eigen vectors from a text file
- *
- * @tparam FloatType Floating-point type for vector components (float, double, etc.)
- * @tparam Dim Dimensionality of each vector
- *
- * @param filename Path to the input text file containing vector data
- *
- * @return std::vector<Eigen::Vector<FloatType, Dim>> Vector of read Eigen vectors
- *
- * @throws std::runtime_error If the file cannot be opened
- *
- * @details Each line in the input file should contain Dim whitespace-separated
- * floating-point values representing a single vector component. This function
- * reads line-by-line and constructs Eigen vectors from the parsed values.
- *
- * @note Extra values on a line beyond Dim are ignored
- * @note Lines with fewer than Dim values will create incomplete vectors
- */
-template <class FloatType, uint32_t Dim>
-std::vector<Eigen::Vector<FloatType, Dim>> readEigenVectorsFromTxtFile(
-    const std::filesystem::path& filename)
-{
-    std::ifstream file(filename);
-    if (!file.is_open())
+    /**
+     * @brief Reads Eigen vectors from a text file
+     *
+     * @tparam FloatType Floating-point type for vector components (float, double, etc.)
+     * @tparam Dim Dimensionality of each vector
+     *
+     * @param filename Path to the input text file containing vector data
+     *
+     * @return std::vector<Eigen::Vector<FloatType, Dim>> Vector of read Eigen vectors
+     *
+     * @throws std::runtime_error If the file cannot be opened
+     *
+     * @details Each line in the input file should contain Dim whitespace-separated
+     * floating-point values representing a single vector component. This function
+     * reads line-by-line and constructs Eigen vectors from the parsed values.
+     *
+     * @note Extra values on a line beyond Dim are ignored
+     * @note Lines with fewer than Dim values will create incomplete vectors
+     */
+    template <class FloatType, uint32_t Dim>
+    std::vector<Eigen::Vector<FloatType, Dim>> readEigenVectorsFromTxtFile(
+        const std::filesystem::path& filename)
     {
-        throw std::runtime_error(std::string("Could not open file: ") + filename.string());
-    }
-
-    std::vector<Eigen::Vector<FloatType, Dim>> vectors;
-    std::string line;
-    while (std::getline(file, line))
-    {
-        std::istringstream iss(line);
-        Eigen::Vector<FloatType, Dim> vector;
-        FloatType value;
-        uint32_t i = 0u;
-        while (iss >> value && i < Dim)
+        std::ifstream file(filename);
+        if (!file.is_open())
         {
-            vector[i] = value;
-            ++i;
+            throw std::runtime_error(std::string("Could not open file: ") + filename.string());
         }
-        vectors.push_back(vector);
-    }
 
-    return vectors;
-}
+        std::vector<Eigen::Vector<FloatType, Dim>> vectors;
+        std::string line;
+        while (std::getline(file, line))
+        {
+            std::istringstream iss(line);
+            Eigen::Vector<FloatType, Dim> vector;
+            FloatType value;
+            uint32_t i = 0u;
+            while (iss >> value && i < Dim)
+            {
+                vector[i] = value;
+                ++i;
+            }
+            vectors.push_back(vector);
+        }
+
+        return vectors;
+    }
 }  // namespace
 
 /**

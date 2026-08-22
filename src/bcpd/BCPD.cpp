@@ -9,9 +9,8 @@
 
 #include <bcpd/GaussianKernel.h>
 #include <nanoflann.hpp>
-#include <tinyply.h>
-
 #include <spdlog/spdlog.h>
+#include <tinyply.h>
 
 #include <algorithm>
 #include <cassert>
@@ -29,188 +28,192 @@
 #include <sstream>
 #include <vector>
 
-namespace {
+namespace
+{
     constexpr bool kNystrom{true};
     constexpr bool kVisualize{false};
     constexpr bool kWriteDebugOutput{true};
     constexpr bool kPrintDebug{false};
-}
+}  // namespace
 
 namespace
 {
 
-std::filesystem::path getDebugOutputDir()
-{
-    if (const char* envDir = std::getenv("BCPD_DEBUG_DIR"))
+    std::filesystem::path getDebugOutputDir()
     {
-        return envDir;
+        if (const char* envDir = std::getenv("BCPD_DEBUG_DIR"))
+        {
+            return envDir;
+        }
+
+        return "./debug_output";
     }
 
-    return "./debug_output";
-}
+    // Hardcoded constants.
+    const std::filesystem::path OUTPUT_DIR = getDebugOutputDir();
+    constexpr float RESIDUAL_CONVERGENCE_THRESHOLD = 0.001f;
+    constexpr uint32_t MAX_ITERATIONS = 100u;
+    constexpr float RESIDUAL_KDTREE_THRESHOLD = 0.04f;
+    constexpr float SEARCH_RADIUS_SCALE = 5.0f;
+    constexpr float SEARCH_RADIUS_MAX = 0.1f;
+    constexpr uint32_t KD_TREE_MAX_LEAF = 10u;
+    constexpr uint32_t NEAREST_NEIGHBORS_FALLBACK = 5u;
+    constexpr float EPSILON_REGULARIZATION = 1.0e-10f;
 
-// Hardcoded constants.
-const std::filesystem::path OUTPUT_DIR = getDebugOutputDir();
-constexpr float RESIDUAL_CONVERGENCE_THRESHOLD = 0.001f;
-constexpr uint32_t MAX_ITERATIONS = 100u;
-constexpr float RESIDUAL_KDTREE_THRESHOLD = 0.04f;
-constexpr float SEARCH_RADIUS_SCALE = 5.0f;
-constexpr float SEARCH_RADIUS_MAX = 0.1f;
-constexpr uint32_t KD_TREE_MAX_LEAF = 10u;
-constexpr uint32_t NEAREST_NEIGHBORS_FALLBACK = 5u;
-constexpr float EPSILON_REGULARIZATION = 1.0e-10f;
-
-// fmt (used by spdlog) cannot auto-format Eigen's expression-template types
-// (e.g. Transpose<...>), so materialize to a string via operator<< first.
-template <typename Derived>
-[[nodiscard]] std::string eigenToString(const Eigen::EigenBase<Derived>& mat)
-{
-    std::ostringstream oss;
-    oss << mat.derived();
-    return oss.str();
-}
-
-class TimeTracker
-{
-public:
-    explicit TimeTracker(std::string_view trackerName) noexcept
-        : name(trackerName), start(std::chrono::high_resolution_clock::now())
+    // fmt (used by spdlog) cannot auto-format Eigen's expression-template types
+    // (e.g. Transpose<...>), so materialize to a string via operator<< first.
+    template <typename Derived>
+    [[nodiscard]] std::string eigenToString(const Eigen::EigenBase<Derived>& mat)
     {
+        std::ostringstream oss;
+        oss << mat.derived();
+        return oss.str();
     }
 
-    ~TimeTracker()
+    class TimeTracker
     {
-        const auto end = std::chrono::high_resolution_clock::now();
-        const auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-        spdlog::debug("{} took: {}ms", name, duration.count());
-    }
+    public:
+        explicit TimeTracker(std::string_view trackerName) noexcept
+            : name(trackerName), start(std::chrono::high_resolution_clock::now())
+        {
+        }
 
-private:
-    std::string name;
-    std::chrono::time_point<std::chrono::high_resolution_clock> start;
-};
+        ~TimeTracker()
+        {
+            const auto end = std::chrono::high_resolution_clock::now();
+            const auto duration =
+                std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+            spdlog::debug("{} took: {}ms", name, duration.count());
+        }
 
-template <typename FloatType, uint32_t Dim>
-void writePly(const std::vector<Eigen::Vector<FloatType, Dim>>& points,
-              const std::filesystem::path& path)
-{
-    struct Vertex
-    {
-        double x, y, z;
+    private:
+        std::string name;
+        std::chrono::time_point<std::chrono::high_resolution_clock> start;
     };
 
-    std::vector<Vertex> pointsOut;
-    pointsOut.reserve(points.size());
-
-    if constexpr(Dim == 3) {
-        for (const auto& point : points)
-        {
-            pointsOut.push_back({point[0], point[1], point[2]});
-        }
-    }
-    else if constexpr(Dim == 2) {
-        for (const auto& point : points)
-        {
-            pointsOut.push_back({point[0], point[1], FloatType(0.0)});
-        }
-    }
-
-    tinyply::PlyFile file;
-    file.add_properties_to_element("vertex", {"x", "y", "z"}, tinyply::Type::FLOAT64, points.size(),
-                                   reinterpret_cast<uint8_t*>(pointsOut.data()),
-                                   tinyply::Type::INVALID, 0);
-
-    std::filebuf fbBinary;
-    std::string filename = path.string() + "-binary.ply";
-    fbBinary.open(filename, std::ios::out | std::ios::binary);
-    std::ostream outstream(&fbBinary);
-
-    if (outstream.fail())
+    template <typename FloatType, uint32_t Dim>
+    void writePly(const std::vector<Eigen::Vector<FloatType, Dim>>& points,
+                  const std::filesystem::path& path)
     {
-        throw std::runtime_error("Failed to open " + filename);
+        struct Vertex
+        {
+            double x, y, z;
+        };
+
+        std::vector<Vertex> pointsOut;
+        pointsOut.reserve(points.size());
+
+        if constexpr (Dim == 3)
+        {
+            for (const auto& point : points)
+            {
+                pointsOut.push_back({point[0], point[1], point[2]});
+            }
+        }
+        else if constexpr (Dim == 2)
+        {
+            for (const auto& point : points)
+            {
+                pointsOut.push_back({point[0], point[1], FloatType(0.0)});
+            }
+        }
+
+        tinyply::PlyFile file;
+        file.add_properties_to_element("vertex", {"x", "y", "z"}, tinyply::Type::FLOAT64,
+                                       points.size(), reinterpret_cast<uint8_t*>(pointsOut.data()),
+                                       tinyply::Type::INVALID, 0);
+
+        std::filebuf fbBinary;
+        std::string filename = path.string() + "-binary.ply";
+        fbBinary.open(filename, std::ios::out | std::ios::binary);
+        std::ostream outstream(&fbBinary);
+
+        if (outstream.fail())
+        {
+            throw std::runtime_error("Failed to open " + filename);
+        }
+        file.write(outstream, true);
     }
-    file.write(outstream, true);
-}
 
-template <typename FloatType> [[nodiscard]] FloatType digamma(FloatType x_in) noexcept
-{
-    double x = static_cast<double>(x_in);
-    double r = 0.0;
-
-    while (x <= 5.0)
+    template <typename FloatType> [[nodiscard]] FloatType digamma(FloatType x_in) noexcept
     {
-        r -= 1.0 / x;
-        x += 1.0;
-    }
+        double x = static_cast<double>(x_in);
+        double r = 0.0;
 
-    const double f = 1.0 / (x * x);
-    const double t =
-        f * (-1.0 / 12.0 +
+        while (x <= 5.0)
+        {
+            r -= 1.0 / x;
+            x += 1.0;
+        }
+
+        const double f = 1.0 / (x * x);
+        const double t =
+            f *
+            (-1.0 / 12.0 +
              f * (1.0 / 120.0 +
                   f * (-1.0 / 252.0 +
                        f * (1.0 / 240.0 +
                             f * (-1.0 / 132.0 + f * (691.0 / 32760.0 +
                                                      f * (-1.0 / 12.0 + f * 3617.0 / 8160.0)))))));
 
-    return static_cast<FloatType>(r + std::log(x) - 0.5 / x + t);
-}
-
-template <typename FloatType>
-[[nodiscard]] FloatType calculateP(FloatType xyDist2, FloatType residual2, FloatType alpha,
-                                   FloatType omega) noexcept
-{
-    constexpr FloatType TWO_PI = 2.0 * std::numbers::pi_v<FloatType>;
-    const FloatType phi_mn =
-        (1.0 / std::sqrt(TWO_PI * residual2)) * std::exp(-xyDist2 / (2.0 * residual2));
-    return (1.0 - omega) * alpha * phi_mn;
-}
-
-template <typename FloatType, uint32_t Dim>
-void calculateNystromApprox(const Kernel<FloatType, Dim>& kernel,
-                            const std::vector<Eigen::Vector<FloatType, Dim>>& y,
-                            uint32_t kSamples,
-                            Eigen::Matrix<FloatType, Eigen::Dynamic, Eigen::Dynamic>& eigenVectors,
-                            Eigen::DiagonalMatrix<FloatType, Eigen::Dynamic>& eigenValues)
-{
-
-    TimeTracker tr("calculateNystromApprox");
-
-    std::vector<uint32_t> indices(y.size());
-    std::iota(indices.begin(), indices.end(), 0u);
-    std::shuffle(indices.begin(), indices.end(), std::mt19937{std::random_device{}()});
-
-    using MatrixType = Eigen::Matrix<FloatType, Eigen::Dynamic, Eigen::Dynamic>;
-
-    MatrixType kernelMat(kSamples, kSamples);
-    for (uint32_t i = 0u; i < kSamples; ++i)
-    {
-        for (uint32_t j = i; j < kSamples; ++j)
-        {
-            const FloatType kernelVal = kernel.compute(y[indices[i]], y[indices[j]]);
-            kernelMat(i, j) = kernelMat(j, i) = kernelVal;
-        }
+        return static_cast<FloatType>(r + std::log(x) - 0.5 / x + t);
     }
 
-    Eigen::JacobiSVD<MatrixType> svd(kernelMat, Eigen::ComputeFullU | Eigen::ComputeFullV);
-
-    spdlog::debug("Singular values: {}", eigenToString(svd.singularValues().transpose()));
-
-    const auto U = svd.matrixU();
-    eigenValues.resize(kSamples);
-    eigenValues = svd.singularValues().asDiagonal();
-    eigenValues.diagonal().array() += EPSILON_REGULARIZATION;
-
-    MatrixType kernelMxK(y.size(), kSamples);
-    for (uint32_t m = 0u; m < y.size(); ++m)
+    template <typename FloatType>
+    [[nodiscard]] FloatType calculateP(FloatType xyDist2, FloatType residual2, FloatType alpha,
+                                       FloatType omega) noexcept
     {
-        for (uint32_t k = 0u; k < kSamples; ++k)
-        {
-            kernelMxK(m, k) = kernel.compute(y[m], y[indices[k]]);
-        }
+        constexpr FloatType TWO_PI = 2.0 * std::numbers::pi_v<FloatType>;
+        const FloatType phi_mn =
+            (1.0 / std::sqrt(TWO_PI * residual2)) * std::exp(-xyDist2 / (2.0 * residual2));
+        return (1.0 - omega) * alpha * phi_mn;
     }
 
-    eigenVectors = kernelMxK * U * eigenValues.inverse();
-}
+    template <typename FloatType, uint32_t Dim>
+    void calculateNystromApprox(
+        const Kernel<FloatType, Dim>& kernel, const std::vector<Eigen::Vector<FloatType, Dim>>& y,
+        uint32_t kSamples, Eigen::Matrix<FloatType, Eigen::Dynamic, Eigen::Dynamic>& eigenVectors,
+        Eigen::DiagonalMatrix<FloatType, Eigen::Dynamic>& eigenValues)
+    {
+
+        TimeTracker tr("calculateNystromApprox");
+
+        std::vector<uint32_t> indices(y.size());
+        std::iota(indices.begin(), indices.end(), 0u);
+        std::shuffle(indices.begin(), indices.end(), std::mt19937{std::random_device{}()});
+
+        using MatrixType = Eigen::Matrix<FloatType, Eigen::Dynamic, Eigen::Dynamic>;
+
+        MatrixType kernelMat(kSamples, kSamples);
+        for (uint32_t i = 0u; i < kSamples; ++i)
+        {
+            for (uint32_t j = i; j < kSamples; ++j)
+            {
+                const FloatType kernelVal = kernel.compute(y[indices[i]], y[indices[j]]);
+                kernelMat(i, j) = kernelMat(j, i) = kernelVal;
+            }
+        }
+
+        Eigen::JacobiSVD<MatrixType> svd(kernelMat, Eigen::ComputeFullU | Eigen::ComputeFullV);
+
+        spdlog::debug("Singular values: {}", eigenToString(svd.singularValues().transpose()));
+
+        const auto U = svd.matrixU();
+        eigenValues.resize(kSamples);
+        eigenValues = svd.singularValues().asDiagonal();
+        eigenValues.diagonal().array() += EPSILON_REGULARIZATION;
+
+        MatrixType kernelMxK(y.size(), kSamples);
+        for (uint32_t m = 0u; m < y.size(); ++m)
+        {
+            for (uint32_t k = 0u; k < kSamples; ++k)
+            {
+                kernelMxK(m, k) = kernel.compute(y[m], y[indices[k]]);
+            }
+        }
+
+        eigenVectors = kernelMxK * U * eigenValues.inverse();
+    }
 
 }  // namespace
 
@@ -249,8 +252,7 @@ template <typename FloatType, uint32_t Dim> inline void BCPD<FloatType, Dim>::Co
     iter = 0u;
     spdlog::info("Iteration: {} residual: {}", iter, residual);
 
-    while (residual > RESIDUAL_CONVERGENCE_THRESHOLD &&
-        iter < MAX_ITERATIONS)
+    while (residual > RESIDUAL_CONVERGENCE_THRESHOLD && iter < MAX_ITERATIONS)
     {
         TimeTracker tr("Iteration");
         ExpectationStep();
@@ -307,16 +309,21 @@ template <typename FloatType, uint32_t Dim> inline void BCPD<FloatType, Dim>::In
 
     residual *= (m_gamma * m_gamma) / static_cast<FloatType>(M * N * Dim);
 
-    if constexpr (!kNystrom) {
+    if constexpr (!kNystrom)
+    {
         sigma.setIdentity(M, M);
         G.resize(M, M);
-        for (uint32_t i = 0u; i < M; ++i) {
-            for (uint32_t j = i; j < M; ++j) {
+        for (uint32_t i = 0u; i < M; ++i)
+        {
+            for (uint32_t j = i; j < M; ++j)
+            {
                 const FloatType kernelVal = m_kernel->compute(y[i], y[j]);
                 G(i, j) = G(j, i) = kernelVal;
             }
         }
-    } else {
+    }
+    else
+    {
         xKdTree = std::make_unique<kdTreeType>(Dim, x, KD_TREE_MAX_LEAF);
         auto numSamples = std::min(kSamples, static_cast<uint32_t>(y.size()));
         calculateNystromApprox<FloatType, Dim>(*m_kernel, y, numSamples, Q, LAMBDA);
@@ -331,13 +338,19 @@ template <typename FloatType, uint32_t Dim> inline void BCPD<FloatType, Dim>::Ex
     const uint32_t M = y.size();
     sigmaSQR = residual;
 
-    if constexpr (kNystrom) {
-        if (residual > RESIDUAL_KDTREE_THRESHOLD) {
+    if constexpr (kNystrom)
+    {
+        if (residual > RESIDUAL_KDTREE_THRESHOLD)
+        {
             computeExpectationNystrom(N, M);
-        } else {
+        }
+        else
+        {
             computeExpectationKdTree(N, M);
         }
-    } else {
+    }
+    else
+    {
         computeExpectationDirect(N, M);
     }
 
@@ -640,19 +653,24 @@ template <typename FloatType, uint32_t Dim> inline void BCPD<FloatType, Dim>::Ma
 
     const FloatType cc = (scale * scale) / residual;
 
-    if constexpr (kNystrom) {
+    if constexpr (kNystrom)
+    {
         computeMaximizationNystrom(M, cc, E);
-    } else {
+    }
+    else
+    {
         computeMaximizationDirect(M, cc, E);
     }
 
-    for (uint32_t i = 0u; i < M; ++i) {
+    for (uint32_t i = 0u; i < M; ++i)
+    {
         y_hat[i] = scale * rotation * u_hat[i] + translation;
     }
 
     updateResidual(N, M);
 
-    if constexpr (kWriteDebugOutput) {
+    if constexpr (kWriteDebugOutput)
+    {
         writeDebugOutput();
     }
 }
@@ -797,25 +815,33 @@ void BCPD<FloatType, Dim>::updateResidual(uint32_t N, uint32_t M)
     scale = (rotation.transpose() * Sxu).trace() / Suu.trace();
     translation = x_avg - scale * rotation * u_avg;
 
-    if constexpr (kNystrom) {
+    if constexpr (kNystrom)
+    {
         residual = FloatType(0.0);
-        for (uint32_t i = 0u; i < N; ++i) {
+        for (uint32_t i = 0u; i < N; ++i)
+        {
             residual += nu_apo[i] * x[i].squaredNorm();
         }
 
-        for (uint32_t i = 0u; i < M; ++i) {
+        for (uint32_t i = 0u; i < M; ++i)
+        {
             residual -= 2.0 * Px[i].dot(y_hat[i]);
         }
 
-        for (uint32_t i = 0u; i < M; ++i) {
+        for (uint32_t i = 0u; i < M; ++i)
+        {
             residual += nu[i] * y_hat[i].squaredNorm();
         }
 
         residual /= (static_cast<FloatType>(Dim) * N_hat);
-    } else {
+    }
+    else
+    {
         residual = 0.0;
-        for (uint32_t i = 0u; i < M; ++i) {
-            for (uint32_t j = 0u; j < N; ++j) {
+        for (uint32_t i = 0u; i < M; ++i)
+        {
+            for (uint32_t j = 0u; j < N; ++j)
+            {
                 residual += P[j][i] * (y_hat[i] - x[j]).squaredNorm();
             }
         }
