@@ -26,6 +26,7 @@ target_link_libraries(${LIB_NAME}
         nanoflann::nanoflann
     PRIVATE
         tinyply::tinyply
+        spdlog::spdlog
 )
 
 if(CMAKE_BUILD_TYPE STREQUAL Debug AND CvPlot_FOUND)

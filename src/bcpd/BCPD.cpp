@@ -11,6 +11,8 @@
 #include <nanoflann.hpp>
 #include <tinyply.h>
 
+#include <spdlog/spdlog.h>
+
 #include <algorithm>
 #include <cassert>
 #include <chrono>
@@ -19,41 +21,54 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <iostream>
 #include <memory>
 #include <numbers>
 #include <numeric>
 #include <random>
 #include <source_location>
+#include <sstream>
 #include <vector>
 
-#ifndef NDEBUG
-#    include <CvPlot/cvplot.h>
-#endif
-
-#define NYSTROM 1
-#define VISUALIZE 0
-#define WRITE_DEBUG_OUTPUT 1
-#define PRINT_DEBUG 0
+namespace {
+    constexpr bool kNystrom{true};
+    constexpr bool kVisualize{false};
+    constexpr bool kWriteDebugOutput{true};
+    constexpr bool kPrintDebug{false};
+}
 
 namespace
 {
-inline std::filesystem::path getDebugOutputDir()
+
+std::filesystem::path getDebugOutputDir()
 {
     if (const char* envDir = std::getenv("BCPD_DEBUG_DIR"))
     {
         return envDir;
     }
+
     return "./debug_output";
 }
+
+// Hardcoded constants.
 const std::filesystem::path OUTPUT_DIR = getDebugOutputDir();
 constexpr float RESIDUAL_CONVERGENCE_THRESHOLD = 0.001f;
+constexpr uint32_t MAX_ITERATIONS = 100u;
 constexpr float RESIDUAL_KDTREE_THRESHOLD = 0.04f;
 constexpr float SEARCH_RADIUS_SCALE = 5.0f;
 constexpr float SEARCH_RADIUS_MAX = 0.1f;
 constexpr uint32_t KD_TREE_MAX_LEAF = 10u;
 constexpr uint32_t NEAREST_NEIGHBORS_FALLBACK = 5u;
 constexpr float EPSILON_REGULARIZATION = 1.0e-10f;
+
+// fmt (used by spdlog) cannot auto-format Eigen's expression-template types
+// (e.g. Transpose<...>), so materialize to a string via operator<< first.
+template <typename Derived>
+[[nodiscard]] std::string eigenToString(const Eigen::EigenBase<Derived>& mat)
+{
+    std::ostringstream oss;
+    oss << mat.derived();
+    return oss.str();
+}
 
 class TimeTracker
 {
@@ -67,7 +82,7 @@ public:
     {
         const auto end = std::chrono::high_resolution_clock::now();
         const auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-        std::cout << name << " took: " << duration.count() << "ms\n";
+        spdlog::debug("{} took: {}ms", name, duration.count());
     }
 
 private:
@@ -83,12 +98,21 @@ void writePly(const std::vector<Eigen::Vector<FloatType, Dim>>& points,
     {
         double x, y, z;
     };
+
     std::vector<Vertex> pointsOut;
     pointsOut.reserve(points.size());
 
-    for (const auto& point : points)
-    {
-        pointsOut.push_back({point[0], point[1], point[2]});
+    if constexpr(Dim == 3) {
+        for (const auto& point : points)
+        {
+            pointsOut.push_back({point[0], point[1], point[2]});
+        }
+    }
+    else if constexpr(Dim == 2) {
+        for (const auto& point : points)
+        {
+            pointsOut.push_back({point[0], point[1], FloatType(0.0)});
+        }
     }
 
     tinyply::PlyFile file;
@@ -140,11 +164,11 @@ template <typename FloatType>
         (1.0 / std::sqrt(TWO_PI * residual2)) * std::exp(-xyDist2 / (2.0 * residual2));
     return (1.0 - omega) * alpha * phi_mn;
 }
-}  // namespace
 
 template <typename FloatType, uint32_t Dim>
 void calculateNystromApprox(const Kernel<FloatType, Dim>& kernel,
-                            const std::vector<Eigen::Vector<FloatType, Dim>>& y, uint32_t kSamples,
+                            const std::vector<Eigen::Vector<FloatType, Dim>>& y,
+                            uint32_t kSamples,
                             Eigen::Matrix<FloatType, Eigen::Dynamic, Eigen::Dynamic>& eigenVectors,
                             Eigen::DiagonalMatrix<FloatType, Eigen::Dynamic>& eigenValues)
 {
@@ -169,7 +193,7 @@ void calculateNystromApprox(const Kernel<FloatType, Dim>& kernel,
 
     Eigen::JacobiSVD<MatrixType> svd(kernelMat, Eigen::ComputeFullU | Eigen::ComputeFullV);
 
-    std::cout << "Singular values: " << svd.singularValues().transpose() << '\n';
+    spdlog::debug("Singular values: {}", eigenToString(svd.singularValues().transpose()));
 
     const auto U = svd.matrixU();
     eigenValues.resize(kSamples);
@@ -187,6 +211,8 @@ void calculateNystromApprox(const Kernel<FloatType, Dim>& kernel,
 
     eigenVectors = kernelMxK * U * eigenValues.inverse();
 }
+
+}  // namespace
 
 template <typename FloatType, uint32_t Dim> inline void BCPD<FloatType, Dim>::Compute()
 {
@@ -221,15 +247,16 @@ template <typename FloatType, uint32_t Dim> inline void BCPD<FloatType, Dim>::Co
     Initialization();
 
     iter = 0u;
-    std::cout << "Iteration: " << iter << " residual: " << residual << '\n';
+    spdlog::info("Iteration: {} residual: {}", iter, residual);
 
-    while (residual > RESIDUAL_CONVERGENCE_THRESHOLD)
+    while (residual > RESIDUAL_CONVERGENCE_THRESHOLD &&
+        iter < MAX_ITERATIONS)
     {
         TimeTracker tr("Iteration");
         ExpectationStep();
         MaximizationStep();
         ++iter;
-        std::cout << "Iteration: " << iter << " residual: " << residual << '\n';
+        spdlog::info("Iteration: {} residual: {}", iter, residual);
     }
 }
 
@@ -280,21 +307,20 @@ template <typename FloatType, uint32_t Dim> inline void BCPD<FloatType, Dim>::In
 
     residual *= (m_gamma * m_gamma) / static_cast<FloatType>(M * N * Dim);
 
-#if !NYSTROM
-    sigma.setIdentity(M, M);
-    G.resize(M, M);
-    for (uint32_t i = 0u; i < M; ++i)
-    {
-        for (uint32_t j = i; j < M; ++j)
-        {
-            const FloatType kernelVal = m_kernel->compute(y[i], y[j]);
-            G(i, j) = G(j, i) = kernelVal;
+    if constexpr (!kNystrom) {
+        sigma.setIdentity(M, M);
+        G.resize(M, M);
+        for (uint32_t i = 0u; i < M; ++i) {
+            for (uint32_t j = i; j < M; ++j) {
+                const FloatType kernelVal = m_kernel->compute(y[i], y[j]);
+                G(i, j) = G(j, i) = kernelVal;
+            }
         }
+    } else {
+        xKdTree = std::make_unique<kdTreeType>(Dim, x, KD_TREE_MAX_LEAF);
+        auto numSamples = std::min(kSamples, static_cast<uint32_t>(y.size()));
+        calculateNystromApprox<FloatType, Dim>(*m_kernel, y, numSamples, Q, LAMBDA);
     }
-#else
-    xKdTree = std::make_unique<kdTreeType>(Dim, x, KD_TREE_MAX_LEAF);
-    calculateNystromApprox<FloatType, Dim>(*m_kernel, y, kSamples, Q, LAMBDA);
-#endif
 }
 
 template <typename FloatType, uint32_t Dim> inline void BCPD<FloatType, Dim>::ExpectationStep()
@@ -305,18 +331,15 @@ template <typename FloatType, uint32_t Dim> inline void BCPD<FloatType, Dim>::Ex
     const uint32_t M = y.size();
     sigmaSQR = residual;
 
-#if NYSTROM
-    if (residual > RESIDUAL_KDTREE_THRESHOLD)
-    {
-        computeExpectationNystrom(N, M);
+    if constexpr (kNystrom) {
+        if (residual > RESIDUAL_KDTREE_THRESHOLD) {
+            computeExpectationNystrom(N, M);
+        } else {
+            computeExpectationKdTree(N, M);
+        }
+    } else {
+        computeExpectationDirect(N, M);
     }
-    else
-    {
-        computeExpectationKdTree(N, M);
-    }
-#else
-    computeExpectationDirect(N, M);
-#endif
 
     for (uint32_t m = 0u; m < M; ++m)
     {
@@ -328,7 +351,7 @@ template <typename FloatType, uint32_t Dim> inline void BCPD<FloatType, Dim>::Ex
 template <typename FloatType, uint32_t Dim>
 void BCPD<FloatType, Dim>::computeExpectationNystrom(uint32_t N, uint32_t M)
 {
-    const uint32_t numVSamples = 2u * (vSamples / 2u);
+    const uint32_t numVSamples = std::min(2u * (vSamples / 2u), static_cast<uint32_t>(x.size()));
 
     std::vector<uint32_t> indicesX(N);
     std::vector<uint32_t> indicesY(M);
@@ -338,7 +361,7 @@ void BCPD<FloatType, Dim>::computeExpectationNystrom(uint32_t N, uint32_t M)
     std::shuffle(indicesX.begin(), indicesX.end(), std::mt19937{std::random_device{}()});
     std::shuffle(indicesY.begin(), indicesY.end(), std::mt19937{std::random_device{}()});
 
-    std::cout << "Using Nyström method for P computation\n";
+    spdlog::debug("Using Nystrom method for P computation");
 
     std::vector<VectorType> v(numVSamples);
     const uint32_t sampleCount = numVSamples / 2u;
@@ -457,7 +480,7 @@ void BCPD<FloatType, Dim>::computeExpectationNystrom(uint32_t N, uint32_t M)
 template <typename FloatType, uint32_t Dim>
 void BCPD<FloatType, Dim>::computeExpectationKdTree(uint32_t N, uint32_t M)
 {
-    std::cout << "Using kd-tree method for P computation\n";
+    spdlog::debug("Using kd-tree method for P computation");
 
     const FloatType searchRadius =
         std::min(static_cast<FloatType>(SEARCH_RADIUS_SCALE) * std::sqrt(residual),
@@ -482,7 +505,7 @@ void BCPD<FloatType, Dim>::computeExpectationKdTree(uint32_t N, uint32_t M)
             {
                 ret_matches.emplace_back(ret_index[i], out_dist_sqr[i]);
             }
-            std::cout << "No matches found at m=" << m << '\n';
+            spdlog::warn("No matches found at m={}", m);
         }
 
         for (const auto& xNeighbor : ret_matches)
@@ -541,7 +564,7 @@ void BCPD<FloatType, Dim>::computeExpectationKdTree(uint32_t N, uint32_t M)
         }
         else
         {
-            std::cout << "Warning: nu[" << m << "] is zero\n";
+            spdlog::warn("nu[{}] is zero", m);
             x_hat[m] = Px[m];
         }
     }
@@ -617,22 +640,21 @@ template <typename FloatType, uint32_t Dim> inline void BCPD<FloatType, Dim>::Ma
 
     const FloatType cc = (scale * scale) / residual;
 
-#if NYSTROM
-    computeMaximizationNystrom(M, cc, E);
-#else
-    computeMaximizationDirect(M, cc, E);
-#endif
+    if constexpr (kNystrom) {
+        computeMaximizationNystrom(M, cc, E);
+    } else {
+        computeMaximizationDirect(M, cc, E);
+    }
 
-    for (uint32_t i = 0u; i < M; ++i)
-    {
+    for (uint32_t i = 0u; i < M; ++i) {
         y_hat[i] = scale * rotation * u_hat[i] + translation;
     }
 
     updateResidual(N, M);
 
-#if WRITE_DEBUG_OUTPUT
-    writeDebugOutput();
-#endif
+    if constexpr (kWriteDebugOutput) {
+        writeDebugOutput();
+    }
 }
 
 template <typename FloatType, uint32_t Dim>
@@ -650,8 +672,9 @@ void BCPD<FloatType, Dim>::computeMaximizationNystrom(uint32_t M, FloatType cc,
 
     const EigenMatrix sigmaKxM = sigmaKxK.inverse() * Q.transpose();
 
-    std::vector<VectorType> v_hatK(kSamples, VectorType::Zero());
-    for (uint32_t i = 0u; i < kSamples; ++i)
+    const auto numSamples = std::min(kSamples, static_cast<uint32_t>(E.size()));
+    std::vector<VectorType> v_hatK(numSamples, VectorType::Zero());
+    for (uint32_t i = 0u; i < numSamples; ++i)
     {
         for (uint32_t j = 0u; j < M; ++j)
         {
@@ -663,7 +686,7 @@ void BCPD<FloatType, Dim>::computeMaximizationNystrom(uint32_t M, FloatType cc,
     for (uint32_t i = 0u; i < M; ++i)
     {
         VectorType v_hat_i = VectorType::Zero();
-        for (uint32_t j = 0u; j < kSamples; ++j)
+        for (uint32_t j = 0u; j < numSamples; ++j)
         {
             v_hat_i += Q(i, j) * v_hatK[j];
         }
@@ -710,7 +733,7 @@ void BCPD<FloatType, Dim>::computeMaximizationDirect(uint32_t M, FloatType cc,
         }
     }
 
-    std::cout << "sigma:\n" << sigma << '\n';
+    spdlog::debug("sigma:\n{}", eigenToString(sigma));
 
     u_hat.resize(M);
     for (uint32_t i = 0u; i < M; ++i)
@@ -727,7 +750,7 @@ void BCPD<FloatType, Dim>::computeMaximizationDirect(uint32_t M, FloatType cc,
 template <typename FloatType, uint32_t Dim>
 void BCPD<FloatType, Dim>::updateResidual(uint32_t N, uint32_t M)
 {
-    std::cout << "u_hat computed\n";
+    spdlog::debug("u_hat computed");
 
     VectorType x_avg = VectorType::Zero();
     for (uint32_t i = 0u; i < M; ++i)
@@ -760,7 +783,7 @@ void BCPD<FloatType, Dim>::updateResidual(uint32_t N, uint32_t M)
     Eigen::JacobiSVD<MatrixType, Eigen::ComputeFullU | Eigen::ComputeFullV> svd(
         Sxu, Eigen::ComputeFullU | Eigen::ComputeFullV);
 
-    std::cout << "Sxu singular values: " << svd.singularValues().transpose() << '\n';
+    spdlog::debug("Sxu singular values: {}", eigenToString(svd.singularValues().transpose()));
 
     const auto U = svd.matrixU();
     const auto V = svd.matrixV();
@@ -769,40 +792,35 @@ void BCPD<FloatType, Dim>::updateResidual(uint32_t N, uint32_t M)
     R_diag(Dim - 1u, Dim - 1u) = (U * V.transpose()).determinant();
     rotation = U * R_diag * V.transpose();
 
-    std::cout << "Rotation determinant: " << rotation.determinant() << '\n';
+    spdlog::debug("Rotation determinant: {}", rotation.determinant());
 
     scale = (rotation.transpose() * Sxu).trace() / Suu.trace();
     translation = x_avg - scale * rotation * u_avg;
 
-#if NYSTROM
-    residual = FloatType(0.0);
-    for (uint32_t i = 0u; i < N; ++i)
-    {
-        residual += nu_apo[i] * x[i].squaredNorm();
-    }
-
-    for (uint32_t i = 0u; i < M; ++i)
-    {
-        residual -= 2.0 * Px[i].dot(y_hat[i]);
-    }
-
-    for (uint32_t i = 0u; i < M; ++i)
-    {
-        residual += nu[i] * y_hat[i].squaredNorm();
-    }
-
-    residual /= (static_cast<FloatType>(Dim) * N_hat);
-#else
-    residual = 0.0;
-    for (uint32_t i = 0u; i < M; ++i)
-    {
-        for (uint32_t j = 0u; j < N; ++j)
-        {
-            residual += P[j][i] * (y_hat[i] - x[j]).squaredNorm();
+    if constexpr (kNystrom) {
+        residual = FloatType(0.0);
+        for (uint32_t i = 0u; i < N; ++i) {
+            residual += nu_apo[i] * x[i].squaredNorm();
         }
+
+        for (uint32_t i = 0u; i < M; ++i) {
+            residual -= 2.0 * Px[i].dot(y_hat[i]);
+        }
+
+        for (uint32_t i = 0u; i < M; ++i) {
+            residual += nu[i] * y_hat[i].squaredNorm();
+        }
+
+        residual /= (static_cast<FloatType>(Dim) * N_hat);
+    } else {
+        residual = 0.0;
+        for (uint32_t i = 0u; i < M; ++i) {
+            for (uint32_t j = 0u; j < N; ++j) {
+                residual += P[j][i] * (y_hat[i] - x[j]).squaredNorm();
+            }
+        }
+        residual /= (static_cast<FloatType>(Dim) * N_hat);
     }
-    residual /= (static_cast<FloatType>(Dim) * N_hat);
-#endif
 }
 
 template <typename FloatType, uint32_t Dim> void BCPD<FloatType, Dim>::writeDebugOutput() const

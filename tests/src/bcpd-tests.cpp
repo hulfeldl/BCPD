@@ -17,6 +17,9 @@
 
 namespace
 {
+    /// Test data dir relative to repo.
+    const auto testDataDir = std::filesystem::path(BCPD_TEST_DATA_DIR);
+
 /**
  * @brief Reads Eigen vectors from a text file
  *
@@ -248,7 +251,7 @@ TEST_CASE("2D fish registration", "[bcpd]")
     using FloatType = double;
     using BCPDType = BCPD<FloatType, 2u>;
 
-    const std::filesystem::path data_dir{"/home/hulfeldl/Documents/10_Code/BCPD/tests/data/2D"};
+    const std::filesystem::path data_dir{testDataDir / "2D"};
     const auto x = readEigenVectorsFromTxtFile<FloatType, 2u>(data_dir / "fish-x.txt");
     const auto y = readEigenVectorsFromTxtFile<FloatType, 2u>(data_dir / "fish-y.txt");
 
@@ -286,7 +289,7 @@ TEST_CASE("3D face registration", "[bcpd]")
     using FloatType = double;
     using BCPDType = BCPD<FloatType, 3u>;
 
-    const std::filesystem::path data_dir{"/home/hulfeldl/Documents/10_Code/BCPD/tests/data/3D"};
+    const std::filesystem::path data_dir{testDataDir / "3D"};
     const auto x = readEigenVectorsFromTxtFile<FloatType, 3u>(data_dir / "face-x.txt");
     const auto y = readEigenVectorsFromTxtFile<FloatType, 3u>(data_dir / "face-y.txt");
 
@@ -323,7 +326,7 @@ TEST_CASE("armadillo registration", "[bcpd]")
     using FloatType = double;
     using BCPDType = BCPD<FloatType, 3u>;
 
-    const std::filesystem::path data_dir{"/home/hulfeldl/Documents/10_Code/BCPD/tests/data/3D"};
+    const std::filesystem::path data_dir{testDataDir / "3D"};
     const auto x = readEigenVectorsFromTxtFile<FloatType, 3u>(data_dir / "armadillo-x.txt");
     const auto y = readEigenVectorsFromTxtFile<FloatType, 3u>(data_dir / "armadillo-y.txt");
 

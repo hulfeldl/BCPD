@@ -14,6 +14,11 @@ target_include_directories(${EXEC_NAME}
         ${CMAKE_SOURCE_DIR}/src
 )
 
+target_compile_definitions(${EXEC_NAME}
+    PRIVATE
+        BCPD_TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/tests/data"
+)
+
 target_link_libraries(${EXEC_NAME}
     PRIVATE
         Catch2::Catch2WithMain
