@@ -1,6 +1,7 @@
 # BCPD
 
-Bayesian Coherent Point Drift implementation in C++23. This repository implements BCPD developed by https://github.com/ohirose/bcpd im modern c++.
+Bayesian Coherent Point Drift implementation in C++23. This repository implements BCPD developed by
+https://github.com/ohirose/bcpd in modern c++.
 
 ## Setup
 
