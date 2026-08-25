@@ -43,7 +43,7 @@ void writePly(const std::vector<Eigen::Vector<FloatType, Dim>>& points,
                                    tinyply::Type::INVALID, 0);
 
     std::filebuf fbBinary;
-    std::string filename = path.string() + "-binary.ply";
+    std::string filename = path.string(); // + "-binary.ply";
     fbBinary.open(filename, std::ios::out | std::ios::binary);
     std::ostream outstream(&fbBinary);
 
