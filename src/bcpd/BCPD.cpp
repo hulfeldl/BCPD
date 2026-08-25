@@ -8,9 +8,9 @@
 #include "BCPD.h"
 
 #include <bcpd/GaussianKernel.h>
+#include <bcpd/PlyUtils.h>
 #include <nanoflann.hpp>
 #include <spdlog/spdlog.h>
-#include <tinyply.h>
 
 #include <algorithm>
 #include <cassert>
@@ -30,15 +30,26 @@
 
 namespace
 {
-    constexpr bool kNystrom{true};
-    constexpr bool kVisualize{false};
-    constexpr bool kWriteDebugOutput{true};
-    constexpr bool kPrintDebug{false};
-}  // namespace
+    // Hardcoded constants.
+    constexpr bool kNystrom  = true;
+    constexpr bool kVisualize = false;
+    constexpr bool kWriteDebugOutput = true;
+    constexpr bool kPrintDebug = false;
 
-namespace
-{
+    constexpr float RESIDUAL_CONVERGENCE_THRESHOLD = 0.001f;
+    constexpr uint32_t MAX_ITERATIONS = 100u;
+    constexpr float RESIDUAL_KDTREE_THRESHOLD = 0.04f;
+    constexpr float SEARCH_RADIUS_SCALE = 5.0f;
+    constexpr float SEARCH_RADIUS_MAX = 0.1f;
+    constexpr uint32_t KD_TREE_MAX_LEAF = 10u;
+    constexpr uint32_t NEAREST_NEIGHBORS_FALLBACK = 5u;
+    constexpr float EPSILON_REGULARIZATION = 1.0e-10f;
 
+    /**
+     * @brief Gets the directory debug output should be written to.
+     *
+     * @return Debug output directory path.
+     */
     std::filesystem::path getDebugOutputDir()
     {
         if (const char* envDir = std::getenv("BCPD_DEBUG_DIR"))
@@ -49,19 +60,17 @@ namespace
         return "./debug_output";
     }
 
-    // Hardcoded constants.
+    // Debug output path.
     const std::filesystem::path OUTPUT_DIR = getDebugOutputDir();
-    constexpr float RESIDUAL_CONVERGENCE_THRESHOLD = 0.001f;
-    constexpr uint32_t MAX_ITERATIONS = 100u;
-    constexpr float RESIDUAL_KDTREE_THRESHOLD = 0.04f;
-    constexpr float SEARCH_RADIUS_SCALE = 5.0f;
-    constexpr float SEARCH_RADIUS_MAX = 0.1f;
-    constexpr uint32_t KD_TREE_MAX_LEAF = 10u;
-    constexpr uint32_t NEAREST_NEIGHBORS_FALLBACK = 5u;
-    constexpr float EPSILON_REGULARIZATION = 1.0e-10f;
 
-    // fmt (used by spdlog) cannot auto-format Eigen's expression-template types
-    // (e.g. Transpose<...>), so materialize to a string via operator<< first.
+    /**
+     * @brief fmt (used by spdlog) cannot auto-format Eigen's expression-template types
+     * (e.g. Transpose<...>), so materialize to a string via operator<< first.
+     *
+     * @param mat Matrix to be formated.
+     *
+     * @return Formated string.
+     */
     template <typename Derived>
     [[nodiscard]] std::string eigenToString(const Eigen::EigenBase<Derived>& mat)
     {
@@ -91,50 +100,15 @@ namespace
         std::chrono::time_point<std::chrono::high_resolution_clock> start;
     };
 
-    template <typename FloatType, uint32_t Dim>
-    void writePly(const std::vector<Eigen::Vector<FloatType, Dim>>& points,
-                  const std::filesystem::path& path)
-    {
-        struct Vertex
-        {
-            double x, y, z;
-        };
-
-        std::vector<Vertex> pointsOut;
-        pointsOut.reserve(points.size());
-
-        if constexpr (Dim == 3)
-        {
-            for (const auto& point : points)
-            {
-                pointsOut.push_back({point[0], point[1], point[2]});
-            }
-        }
-        else if constexpr (Dim == 2)
-        {
-            for (const auto& point : points)
-            {
-                pointsOut.push_back({point[0], point[1], FloatType(0.0)});
-            }
-        }
-
-        tinyply::PlyFile file;
-        file.add_properties_to_element("vertex", {"x", "y", "z"}, tinyply::Type::FLOAT64,
-                                       points.size(), reinterpret_cast<uint8_t*>(pointsOut.data()),
-                                       tinyply::Type::INVALID, 0);
-
-        std::filebuf fbBinary;
-        std::string filename = path.string() + "-binary.ply";
-        fbBinary.open(filename, std::ios::out | std::ios::binary);
-        std::ostream outstream(&fbBinary);
-
-        if (outstream.fail())
-        {
-            throw std::runtime_error("Failed to open " + filename);
-        }
-        file.write(outstream, true);
-    }
-
+    /**
+     * @brief Computes the digamma function (derivative of the log-gamma function).
+     *
+     * @tparam FloatType Floating point type.
+     *
+     * @param x_in Input value.
+     *
+     * @return Digamma of x_in.
+     */
     template <typename FloatType> [[nodiscard]] FloatType digamma(FloatType x_in) noexcept
     {
         double x = static_cast<double>(x_in);
@@ -159,6 +133,18 @@ namespace
         return static_cast<FloatType>(r + std::log(x) - 0.5 / x + t);
     }
 
+    /**
+     * @brief Computes the unnormalized GMM probability contribution for a point pair.
+     *
+     * @tparam FloatType Floating point type.
+     *
+     * @param xyDist2 Squared distance between the two points.
+     * @param residual2 Variance of the Gaussian kernel.
+     * @param alpha Mixture weight of the target point.
+     * @param omega Outlier ratio.
+     *
+     * @return Unnormalized probability p_mn.
+     */
     template <typename FloatType>
     [[nodiscard]] FloatType calculateP(FloatType xyDist2, FloatType residual2, FloatType alpha,
                                        FloatType omega) noexcept
@@ -169,6 +155,85 @@ namespace
         return (1.0 - omega) * alpha * phi_mn;
     }
 
+    /**
+     * Shared Nystrom approximation building blocks. Both calculateNystromApprox()
+     * (approximates a kernel's eigendecomposition from a landmark subset, used
+     * once in Initialization()) and computeExpectationNystrom() (approximates
+     * kernel matrix-vector products against a landmark subset, used every
+     * ExpectationStep()) reduce to the same two steps: build the symmetric
+     * landmark-landmark kernel matrix, and build a query-landmark cross kernel
+     * matrix. They differ only in which kernel function and which point sets
+     * they plug in, so that part is left to the caller via kernelFn.
+     */
+
+    /**
+     * @brief Builds the numLandmarks x numLandmarks symmetric kernel (Gram) matrix.
+     *
+     * @tparam FloatType Floating point type.
+     * @tparam KernelFn Callable evaluating the kernel between two landmark indices.
+     *
+     * @param numLandmarks Number of landmarks.
+     * @param kernelFn Kernel function; kernelFn(i, j) evaluates the kernel between landmarks i and j.
+     *
+     * @return The numLandmarks x numLandmarks symmetric kernel matrix.
+     */
+    template <typename FloatType, typename KernelFn>
+    [[nodiscard]] Eigen::Matrix<FloatType, Eigen::Dynamic, Eigen::Dynamic> buildSymmetricKernelMatrix(
+        uint32_t numLandmarks, KernelFn&& kernelFn)
+    {
+        Eigen::Matrix<FloatType, Eigen::Dynamic, Eigen::Dynamic> kernelMat(numLandmarks, numLandmarks);
+        for (uint32_t i = 0u; i < numLandmarks; ++i)
+        {
+            for (uint32_t j = i; j < numLandmarks; ++j)
+            {
+                const FloatType kernelVal = kernelFn(i, j);
+                kernelMat(i, j) = kernelMat(j, i) = kernelVal;
+            }
+        }
+        return kernelMat;
+    }
+
+    /**
+     * @brief Builds the numQuery x numLandmarks cross kernel matrix.
+     *
+     * @tparam FloatType Floating point type.
+     * @tparam KernelFn Callable evaluating the kernel between a query point and a landmark.
+     *
+     * @param numQuery Number of query points.
+     * @param numLandmarks Number of landmarks.
+     * @param kernelFn Kernel function; kernelFn(q, l) evaluates the kernel between query point q
+     * and landmark l.
+     *
+     * @return The numQuery x numLandmarks cross kernel matrix.
+     */
+    template <typename FloatType, typename KernelFn>
+    [[nodiscard]] Eigen::Matrix<FloatType, Eigen::Dynamic, Eigen::Dynamic> buildCrossKernelMatrix(
+        uint32_t numQuery, uint32_t numLandmarks, KernelFn&& kernelFn)
+    {
+        Eigen::Matrix<FloatType, Eigen::Dynamic, Eigen::Dynamic> kernelMat(numQuery, numLandmarks);
+        for (uint32_t q = 0u; q < numQuery; ++q)
+        {
+            for (uint32_t l = 0u; l < numLandmarks; ++l)
+            {
+                kernelMat(q, l) = kernelFn(q, l);
+            }
+        }
+        return kernelMat;
+    }
+
+    /**
+     * @brief Approximates the eigendecomposition of the kernel matrix over y using the Nystrom
+     * method.
+     *
+     * @tparam FloatType Floating point type.
+     * @tparam Dim Dimensionality of the points.
+     *
+     * @param kernel Kernel used to evaluate point-to-point similarity.
+     * @param y Points to approximate the kernel eigendecomposition for.
+     * @param kSamples Number of landmark points sampled from y.
+     * @param[out] eigenVectors Approximated eigenvectors of the kernel matrix.
+     * @param[out] eigenValues Approximated eigenvalues of the kernel matrix.
+     */
     template <typename FloatType, uint32_t Dim>
     void calculateNystromApprox(
         const Kernel<FloatType, Dim>& kernel, const std::vector<Eigen::Vector<FloatType, Dim>>& y,
@@ -184,15 +249,9 @@ namespace
 
         using MatrixType = Eigen::Matrix<FloatType, Eigen::Dynamic, Eigen::Dynamic>;
 
-        MatrixType kernelMat(kSamples, kSamples);
-        for (uint32_t i = 0u; i < kSamples; ++i)
-        {
-            for (uint32_t j = i; j < kSamples; ++j)
-            {
-                const FloatType kernelVal = kernel.compute(y[indices[i]], y[indices[j]]);
-                kernelMat(i, j) = kernelMat(j, i) = kernelVal;
-            }
-        }
+        MatrixType kernelMat = buildSymmetricKernelMatrix<FloatType>(
+            kSamples,
+            [&](uint32_t i, uint32_t j) { return kernel.compute(y[indices[i]], y[indices[j]]); });
 
         Eigen::JacobiSVD<MatrixType> svd(kernelMat, Eigen::ComputeFullU | Eigen::ComputeFullV);
 
@@ -203,20 +262,18 @@ namespace
         eigenValues = svd.singularValues().asDiagonal();
         eigenValues.diagonal().array() += EPSILON_REGULARIZATION;
 
-        MatrixType kernelMxK(y.size(), kSamples);
-        for (uint32_t m = 0u; m < y.size(); ++m)
-        {
-            for (uint32_t k = 0u; k < kSamples; ++k)
-            {
-                kernelMxK(m, k) = kernel.compute(y[m], y[indices[k]]);
-            }
-        }
+        MatrixType kernelMxK = buildCrossKernelMatrix<FloatType>(
+            static_cast<uint32_t>(y.size()), kSamples,
+            [&](uint32_t m, uint32_t k) { return kernel.compute(y[m], y[indices[k]]); });
 
         eigenVectors = kernelMxK * U * eigenValues.inverse();
     }
 
 }  // namespace
 
+/**
+ * @brief Runs the BCPD registration until convergence or the iteration limit is reached.
+ */
 template <typename FloatType, uint32_t Dim> inline void BCPD<FloatType, Dim>::Compute()
 {
     auto normalizePoints = [this](std::vector<VectorType>& points) -> void
@@ -262,6 +319,9 @@ template <typename FloatType, uint32_t Dim> inline void BCPD<FloatType, Dim>::Co
     }
 }
 
+/**
+ * @brief Initializes registration state (kernel, priors, residual) before the EM loop.
+ */
 template <typename FloatType, uint32_t Dim> inline void BCPD<FloatType, Dim>::Initialization()
 {
     const uint32_t N = x.size();
@@ -330,6 +390,9 @@ template <typename FloatType, uint32_t Dim> inline void BCPD<FloatType, Dim>::In
     }
 }
 
+/**
+ * @brief Computes the E-step: point correspondence probabilities and their moments.
+ */
 template <typename FloatType, uint32_t Dim> inline void BCPD<FloatType, Dim>::ExpectationStep()
 {
     TimeTracker tr("ExpectationStep");
@@ -361,6 +424,15 @@ template <typename FloatType, uint32_t Dim> inline void BCPD<FloatType, Dim>::Ex
     }
 }
 
+/**
+ * @brief Computes the E-step correspondence statistics using the Nystrom approximation.
+ *
+ * @tparam FloatType Floating point type.
+ * @tparam Dim Dimensionality of the points.
+ *
+ * @param N Number of points in the target point cloud x.
+ * @param M Number of points in the source point cloud y.
+ */
 template <typename FloatType, uint32_t Dim>
 void BCPD<FloatType, Dim>::computeExpectationNystrom(uint32_t N, uint32_t M)
 {
@@ -384,35 +456,21 @@ void BCPD<FloatType, Dim>::computeExpectationNystrom(uint32_t N, uint32_t M)
         v[2u * i + 1u] = y_hat[indicesY[i]];
     }
 
-    EigenMatrix kernelVxV(numVSamples, numVSamples);
-    for (uint32_t i = 0u; i < numVSamples; ++i)
+    const auto gaussianKernel = [this](const VectorType& a, const VectorType& b) -> FloatType
     {
-        for (uint32_t j = i; j < numVSamples; ++j)
-        {
-            const FloatType kernelVal = std::exp(-(v[i] - v[j]).squaredNorm() / (2.0 * residual));
-            kernelVxV(i, j) = kernelVxV(j, i) = kernelVal;
-        }
-    }
+        return std::exp(-(a - b).squaredNorm() / (2.0 * residual));
+    };
 
-    EigenMatrix kernelXxV(N, numVSamples);
-    for (uint32_t n = 0u; n < N; ++n)
-    {
-        for (uint32_t k = 0u; k < numVSamples; ++k)
-        {
-            kernelXxV(n, k) = std::exp(-(x[n] - v[k]).squaredNorm() / (2.0 * residual));
-        }
-    }
+    const EigenMatrix kernelVxV = buildSymmetricKernelMatrix<FloatType>(
+        numVSamples, [&](uint32_t i, uint32_t j) { return gaussianKernel(v[i], v[j]); });
+
+    const EigenMatrix kernelXxV = buildCrossKernelMatrix<FloatType>(
+        N, numVSamples, [&](uint32_t n, uint32_t k) { return gaussianKernel(x[n], v[k]); });
 
     const EigenMatrix kernelVxX = kernelVxV.inverse() * kernelXxV.transpose();
 
-    EigenMatrix kernelYxV(M, numVSamples);
-    for (uint32_t m = 0u; m < M; ++m)
-    {
-        for (uint32_t k = 0u; k < numVSamples; ++k)
-        {
-            kernelYxV(m, k) = std::exp(-(y_hat[m] - v[k]).squaredNorm() / (2.0 * residual));
-        }
-    }
+    const EigenMatrix kernelYxV = buildCrossKernelMatrix<FloatType>(
+        M, numVSamples, [&](uint32_t m, uint32_t k) { return gaussianKernel(y_hat[m], v[k]); });
 
     std::vector<FloatType> b(M);
     for (uint32_t m = 0u; m < M; ++m)
@@ -490,6 +548,15 @@ void BCPD<FloatType, Dim>::computeExpectationNystrom(uint32_t N, uint32_t M)
     }
 }
 
+/**
+ * @brief Computes the E-step correspondence statistics using a kd-tree radius search.
+ *
+ * @tparam FloatType Floating point type.
+ * @tparam Dim Dimensionality of the points.
+ *
+ * @param N Number of points in the target point cloud x.
+ * @param M Number of points in the source point cloud y.
+ */
 template <typename FloatType, uint32_t Dim>
 void BCPD<FloatType, Dim>::computeExpectationKdTree(uint32_t N, uint32_t M)
 {
@@ -583,6 +650,15 @@ void BCPD<FloatType, Dim>::computeExpectationKdTree(uint32_t N, uint32_t M)
     }
 }
 
+/**
+ * @brief Computes the E-step correspondence statistics by direct dense evaluation.
+ *
+ * @tparam FloatType Floating point type.
+ * @tparam Dim Dimensionality of the points.
+ *
+ * @param N Number of points in the target point cloud x.
+ * @param M Number of points in the source point cloud y.
+ */
 template <typename FloatType, uint32_t Dim>
 void BCPD<FloatType, Dim>::computeExpectationDirect(uint32_t N, uint32_t M)
 {
@@ -638,6 +714,9 @@ void BCPD<FloatType, Dim>::computeExpectationDirect(uint32_t N, uint32_t M)
     }
 }
 
+/**
+ * @brief Computes the M-step: updates the rigid transform, deformation and residual.
+ */
 template <typename FloatType, uint32_t Dim> inline void BCPD<FloatType, Dim>::MaximizationStep()
 {
     TimeTracker tr("MaximizationStep");
@@ -675,10 +754,22 @@ template <typename FloatType, uint32_t Dim> inline void BCPD<FloatType, Dim>::Ma
     }
 }
 
+/**
+ * @brief Solves the M-step displacement update using the cached Nystrom decomposition.
+ *
+ * @tparam FloatType Floating point type.
+ * @tparam Dim Dimensionality of the points.
+ *
+ * @param M Number of points in the source point cloud y.
+ * @param cc Precomputed scale^2 / residual factor.
+ * @param E Per-point residual displacement vectors.
+ */
 template <typename FloatType, uint32_t Dim>
 void BCPD<FloatType, Dim>::computeMaximizationNystrom(uint32_t M, FloatType cc,
                                                       const std::vector<VectorType>& E)
 {
+    // Reuses the same Nystrom decomposition (Q, LAMBDA) that calculateNystromApprox()
+    // computed once in Initialization(), rather than rebuilding a kernel matrix here.
     Eigen::Vector<FloatType, Eigen::Dynamic> nuVec(M);
     for (uint32_t j = 0u; j < M; ++j)
     {
@@ -712,6 +803,16 @@ void BCPD<FloatType, Dim>::computeMaximizationNystrom(uint32_t M, FloatType cc,
     }
 }
 
+/**
+ * @brief Solves the M-step displacement update by directly inverting the dense kernel system.
+ *
+ * @tparam FloatType Floating point type.
+ * @tparam Dim Dimensionality of the points.
+ *
+ * @param M Number of points in the source point cloud y.
+ * @param cc Precomputed scale^2 / residual factor.
+ * @param E Per-point residual displacement vectors.
+ */
 template <typename FloatType, uint32_t Dim>
 void BCPD<FloatType, Dim>::computeMaximizationDirect(uint32_t M, FloatType cc,
                                                      const std::vector<VectorType>& E)
@@ -765,6 +866,15 @@ void BCPD<FloatType, Dim>::computeMaximizationDirect(uint32_t M, FloatType cc,
     }
 }
 
+/**
+ * @brief Updates the rigid transform (rotation, scale, translation) and the residual variance.
+ *
+ * @tparam FloatType Floating point type.
+ * @tparam Dim Dimensionality of the points.
+ *
+ * @param N Number of points in the target point cloud x.
+ * @param M Number of points in the source point cloud y.
+ */
 template <typename FloatType, uint32_t Dim>
 void BCPD<FloatType, Dim>::updateResidual(uint32_t N, uint32_t M)
 {
@@ -849,6 +959,9 @@ void BCPD<FloatType, Dim>::updateResidual(uint32_t N, uint32_t M)
     }
 }
 
+/**
+ * @brief Writes the current point clouds to PLY files for the current iteration.
+ */
 template <typename FloatType, uint32_t Dim> void BCPD<FloatType, Dim>::writeDebugOutput() const
 {
     const std::string folder = "Iteration_" + std::to_string(iter);

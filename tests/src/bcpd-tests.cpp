@@ -15,6 +15,8 @@
 #include <sstream>
 #include <stdexcept>
 
+#include "bcpd/PlyUtils.h"
+
 namespace
 {
     /// Test data dir relative to repo.
@@ -304,6 +306,34 @@ TEST_CASE("3D face registration", "[bcpd]")
     REQUIRE(true);
 }
 
+template <typename FloatType, uint32_t Dim>
+void writeOutput(std::string name,  const std::vector<Eigen::Vector<FloatType, Dim>> & y)
+{
+    const auto outDir = testDataDir / "output" / name;
+    std::filesystem::create_directories(outDir);
+
+    writePly<FloatType, Dim>(y, outDir / "yOut.ply");
+}
+
+template <typename FloatType, uint32_t Dim>
+std::vector<Eigen::Vector<FloatType, Dim>> readAndWriteInput(const std::filesystem::path& data_dir, const std::filesystem::path& fileName)
+{
+    // Replace file extension with ply.
+    auto filePly = fileName;
+    filePly.replace_extension("ply");
+
+    // Read data.
+    const auto data = readEigenVectorsFromTxtFile<FloatType, 3u>(data_dir / fileName);
+
+    // Write ply file if it does not exist.
+    if (!std::filesystem::exists(filePly))
+    {
+        writePly<FloatType, Dim>(data, data_dir / filePly);
+    }
+
+    return data;
+}
+
 /**
  * @test Armadillo registration test
  * @brief Tests BCPD with real-world 3D armadillo point cloud data
@@ -327,8 +357,8 @@ TEST_CASE("armadillo registration", "[bcpd]")
     using BCPDType = BCPD<FloatType, 3u>;
 
     const std::filesystem::path data_dir{testDataDir / "3D"};
-    const auto x = readEigenVectorsFromTxtFile<FloatType, 3u>(data_dir / "armadillo-x.txt");
-    const auto y = readEigenVectorsFromTxtFile<FloatType, 3u>(data_dir / "armadillo-y.txt");
+    const auto x = readAndWriteInput<FloatType, 3u>(data_dir, "armadillo-x.txt");
+    const auto y = readAndWriteInput<FloatType, 3u>(data_dir, "armadillo-y.txt");
 
     constexpr FloatType beta{0.3};
     constexpr FloatType lambda{1.0e4};
@@ -338,5 +368,9 @@ TEST_CASE("armadillo registration", "[bcpd]")
     BCPDType bcpd(beta, lambda, omega, gamma);
     bcpd.SetInput(x, y);
     bcpd.Compute();
+
+    const auto iterDir = testDataDir / "output" / "armadillo";
+    writeOutput<FloatType, 3u>("armadillo", bcpd.GetOutput());
+
     REQUIRE(true);
 }

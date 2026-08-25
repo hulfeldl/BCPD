@@ -53,6 +53,11 @@ public:
         y = y_in;
     }
 
+    std::vector<VectorType> GetOutput() const noexcept
+    {
+        return y;
+    }
+
     void Compute();
 
 protected:

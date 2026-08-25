@@ -11,6 +11,8 @@ add_library(${LIB_NAME} STATIC
         Kernel.h
         GaussianKernel.h
         KDTreeVectorOfVectorsAdaptor.h
+        PlyUtils.cpp
+        PlyUtils.h
 )
 
 set_property(TARGET ${LIB_NAME} PROPERTY POSITION_INDEPENDENT_CODE NO)
