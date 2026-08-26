@@ -32,9 +32,13 @@ namespace
 {
     // Hardcoded constants.
     constexpr bool kNystrom  = true;
-    constexpr bool kVisualize = false;
+    //constexpr bool kVisualize = false;
     constexpr bool kWriteDebugOutput = true;
-    constexpr bool kPrintDebug = false;
+    //constexpr bool kPrintDebug = false;
+
+    // If true, RNGs used for landmark/pivot sampling are seeded from a fixed value so runs are
+    // reproducible; if false, they are seeded from std::random_device on each use.
+    constexpr bool kDeterministicSeeding = true;
 
     constexpr float RESIDUAL_CONVERGENCE_THRESHOLD = 0.001f;
     constexpr uint32_t MAX_ITERATIONS = 100u;
@@ -62,6 +66,30 @@ namespace
 
     // Debug output path.
     const std::filesystem::path OUTPUT_DIR = getDebugOutputDir();
+
+    /**
+     * @brief Builds an RNG for landmark/pivot sampling, seeded per kDeterministicSeeding.
+     *
+     * @param seedOffset Added to kFixedSeed in deterministic mode, so that multiple RNGs
+     * constructed in the same scope (e.g. one per point set) don't share an identical stream.
+     * Ignored when kDeterministicSeeding is false.
+     *
+     * @return A seeded std::mt19937: deterministically from kFixedSeed + seedOffset if
+     * kDeterministicSeeding is set, otherwise from std::random_device.
+     */
+    [[nodiscard]] std::mt19937 makeRng(uint32_t seedOffset = 0u)
+    {
+        constexpr uint32_t kFixedSeed = 0u;
+
+        if constexpr (kDeterministicSeeding)
+        {
+            return std::mt19937{kFixedSeed + seedOffset};
+        }
+        else
+        {
+            return std::mt19937{std::random_device{}()};
+        }
+    }
 
     /**
      * @brief fmt (used by spdlog) cannot auto-format Eigen's expression-template types
@@ -245,7 +273,7 @@ namespace
 
         std::vector<uint32_t> indices(y.size());
         std::iota(indices.begin(), indices.end(), 0u);
-        std::shuffle(indices.begin(), indices.end(), std::mt19937{std::random_device{}()});
+        std::ranges::shuffle(indices, makeRng());
 
         using MatrixType = Eigen::Matrix<FloatType, Eigen::Dynamic, Eigen::Dynamic>;
 
@@ -276,7 +304,7 @@ namespace
  */
 template <typename FloatType, uint32_t Dim> inline void BCPD<FloatType, Dim>::Compute()
 {
-    auto normalizePoints = [this](std::vector<VectorType>& points) -> void
+    auto normalizePoints = [](std::vector<VectorType>& points) -> void
     {
         if (points.empty())
             return;
@@ -307,16 +335,17 @@ template <typename FloatType, uint32_t Dim> inline void BCPD<FloatType, Dim>::Co
     Initialization();
 
     iter = 0u;
-    spdlog::info("Iteration: {} residual: {}", iter, residual);
-
     while (residual > RESIDUAL_CONVERGENCE_THRESHOLD && iter < MAX_ITERATIONS)
     {
+        spdlog::info("Iteration: {} residual: {}", iter, residual);
+
         TimeTracker tr("Iteration");
         ExpectationStep();
         MaximizationStep();
         ++iter;
-        spdlog::info("Iteration: {} residual: {}", iter, residual);
     }
+
+    spdlog::info("Final: iteration: {} residual: {}", iter, residual);
 }
 
 /**
@@ -443,8 +472,8 @@ void BCPD<FloatType, Dim>::computeExpectationNystrom(uint32_t N, uint32_t M)
     std::iota(indicesX.begin(), indicesX.end(), 0u);
     std::iota(indicesY.begin(), indicesY.end(), 0u);
 
-    std::shuffle(indicesX.begin(), indicesX.end(), std::mt19937{std::random_device{}()});
-    std::shuffle(indicesY.begin(), indicesY.end(), std::mt19937{std::random_device{}()});
+    std::ranges::shuffle(indicesX, makeRng(0u));
+    std::ranges::shuffle(indicesY, makeRng(1u));
 
     spdlog::debug("Using Nystrom method for P computation");
 
