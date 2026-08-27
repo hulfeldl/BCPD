@@ -12,7 +12,8 @@
 #include <cmath>
 #include <cstdint>
 
-template <typename FloatType, uint32_t Dim> class GaussKernel : public Kernel<FloatType, Dim>
+template <typename FloatType, uint32_t Dim>
+class GaussKernel : public Kernel<FloatType, Dim>
 {
 public:
     explicit GaussKernel(FloatType beta) noexcept : h(beta) {}

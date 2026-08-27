@@ -32,10 +32,10 @@
 namespace
 {
     // Hardcoded constants.
-    constexpr bool kNystrom  = true;
-    //constexpr bool kVisualize = false;
+    constexpr bool kNystrom = true;
+    // constexpr bool kVisualize = false;
     constexpr bool kWriteDebugOutput = true;
-    //constexpr bool kPrintDebug = false;
+    // constexpr bool kPrintDebug = false;
 
     // If true, RNGs used for landmark/pivot sampling are seeded from a fixed value so runs are
     // reproducible; if false, they are seeded from std::random_device on each use.
@@ -169,15 +169,17 @@ namespace
      * @tparam KernelFn Callable evaluating the kernel between two landmark indices.
      *
      * @param numLandmarks Number of landmarks.
-     * @param kernelFn Kernel function; kernelFn(i, j) evaluates the kernel between landmarks i and j.
+     * @param kernelFn Kernel function; kernelFn(i, j) evaluates the kernel between landmarks i and
+     * j.
      *
      * @return The numLandmarks x numLandmarks symmetric kernel matrix.
      */
     template <typename FloatType, typename KernelFn>
-    [[nodiscard]] Eigen::Matrix<FloatType, Eigen::Dynamic, Eigen::Dynamic> buildSymmetricKernelMatrix(
-        uint32_t numLandmarks, KernelFn&& kernelFn)
+    [[nodiscard]] Eigen::Matrix<FloatType, Eigen::Dynamic, Eigen::Dynamic>
+    buildSymmetricKernelMatrix(uint32_t numLandmarks, KernelFn&& kernelFn)
     {
-        Eigen::Matrix<FloatType, Eigen::Dynamic, Eigen::Dynamic> kernelMat(numLandmarks, numLandmarks);
+        Eigen::Matrix<FloatType, Eigen::Dynamic, Eigen::Dynamic> kernelMat(numLandmarks,
+                                                                           numLandmarks);
         for (uint32_t i = 0u; i < numLandmarks; ++i)
         {
             for (uint32_t j = i; j < numLandmarks; ++j)
@@ -270,7 +272,8 @@ namespace
 /**
  * @brief Runs the BCPD registration until convergence or the iteration limit is reached.
  */
-template <typename FloatType, uint32_t Dim> inline void BCPD<FloatType, Dim>::Compute()
+template <typename FloatType, uint32_t Dim>
+inline void BCPD<FloatType, Dim>::Compute()
 {
     auto normalizePoints = [](std::vector<VectorType>& points) -> void
     {
@@ -319,7 +322,8 @@ template <typename FloatType, uint32_t Dim> inline void BCPD<FloatType, Dim>::Co
 /**
  * @brief Initializes registration state (kernel, priors, residual) before the EM loop.
  */
-template <typename FloatType, uint32_t Dim> inline void BCPD<FloatType, Dim>::Initialization()
+template <typename FloatType, uint32_t Dim>
+inline void BCPD<FloatType, Dim>::Initialization()
 {
     const uint32_t N = x.size();
     const uint32_t M = y.size();
@@ -390,7 +394,8 @@ template <typename FloatType, uint32_t Dim> inline void BCPD<FloatType, Dim>::In
 /**
  * @brief Computes the E-step: point correspondence probabilities and their moments.
  */
-template <typename FloatType, uint32_t Dim> inline void BCPD<FloatType, Dim>::ExpectationStep()
+template <typename FloatType, uint32_t Dim>
+inline void BCPD<FloatType, Dim>::ExpectationStep()
 {
     TimeTracker tr("ExpectationStep");
 
@@ -454,9 +459,7 @@ void BCPD<FloatType, Dim>::computeExpectationNystrom(uint32_t N, uint32_t M)
     }
 
     const auto gaussianKernel = [this](const VectorType& a, const VectorType& b) -> FloatType
-    {
-        return std::exp(-(a - b).squaredNorm() / (2.0 * residual));
-    };
+    { return std::exp(-(a - b).squaredNorm() / (2.0 * residual)); };
 
     const EigenMatrix kernelVxV = buildSymmetricKernelMatrix<FloatType>(
         numVSamples, [&](uint32_t i, uint32_t j) { return gaussianKernel(v[i], v[j]); });
@@ -714,7 +717,8 @@ void BCPD<FloatType, Dim>::computeExpectationDirect(uint32_t N, uint32_t M)
 /**
  * @brief Computes the M-step: updates the rigid transform, deformation and residual.
  */
-template <typename FloatType, uint32_t Dim> inline void BCPD<FloatType, Dim>::MaximizationStep()
+template <typename FloatType, uint32_t Dim>
+inline void BCPD<FloatType, Dim>::MaximizationStep()
 {
     TimeTracker tr("MaximizationStep");
 
@@ -959,7 +963,8 @@ void BCPD<FloatType, Dim>::updateResidual(uint32_t N, uint32_t M)
 /**
  * @brief Writes the current point clouds to PLY files for the current iteration.
  */
-template <typename FloatType, uint32_t Dim> void BCPD<FloatType, Dim>::writeDebugOutput() const
+template <typename FloatType, uint32_t Dim>
+void BCPD<FloatType, Dim>::writeDebugOutput() const
 {
     const std::string folder = "Iteration_" + std::to_string(iter);
     const auto iterDir = OUTPUT_DIR / folder;

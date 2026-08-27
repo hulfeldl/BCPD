@@ -126,7 +126,11 @@ struct KDTreeVectorOfVectorsAdaptor
     // Return true if the BBOX was already computed by the class and returned
     // in "bb" so it can be avoided to redo it again. Look at bb.size() to
     // find out the expected dimensionality (e.g. 2 or 3 for point clouds)
-    template <class BBOX> bool kdtree_get_bbox(BBOX& /*bb*/) const { return false; }
+    template <class BBOX>
+    bool kdtree_get_bbox(BBOX& /*bb*/) const
+    {
+        return false;
+    }
 
     /** @} */
 

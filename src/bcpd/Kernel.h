@@ -11,7 +11,8 @@
 
 #include <cstdint>
 
-template <class FloatType, uint32_t dim> class Kernel
+template <class FloatType, uint32_t dim>
+class Kernel
 {
 public:
     using VectorType = Eigen::Vector<FloatType, dim>;

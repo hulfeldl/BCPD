@@ -5,6 +5,8 @@
  * @author Lorenz Hulfeld (lorenz.hulfeld@gmail.com)
  */
 
+#include "bcpd/PlyUtils.h"
+
 #include <bcpd/BCPD.h>
 #include <catch2/catch_test_macros.hpp>
 
@@ -14,8 +16,6 @@
 #include <random>
 #include <sstream>
 #include <stdexcept>
-
-#include "bcpd/PlyUtils.h"
 
 namespace
 {
@@ -307,7 +307,7 @@ TEST_CASE("3D face registration", "[bcpd]")
 }
 
 template <typename FloatType, uint32_t Dim>
-void writeOutput(std::string name,  const std::vector<Eigen::Vector<FloatType, Dim>> & y)
+void writeOutput(std::string name, const std::vector<Eigen::Vector<FloatType, Dim>>& y)
 {
     const auto outDir = testDataDir / "output" / name;
     std::filesystem::create_directories(outDir);
@@ -316,7 +316,8 @@ void writeOutput(std::string name,  const std::vector<Eigen::Vector<FloatType, D
 }
 
 template <typename FloatType, uint32_t Dim>
-std::vector<Eigen::Vector<FloatType, Dim>> readAndWriteInput(const std::filesystem::path& data_dir, const std::filesystem::path& fileName)
+std::vector<Eigen::Vector<FloatType, Dim>> readAndWriteInput(const std::filesystem::path& data_dir,
+                                                             const std::filesystem::path& fileName)
 {
     // Replace file extension with ply.
     auto filePly = fileName;

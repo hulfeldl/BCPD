@@ -7,8 +7,9 @@
 
 #include "PlyUtils.h"
 
-#include <fstream>
 #include <tinyply.h>
+
+#include <fstream>
 
 template <typename FloatType, uint32_t Dim>
 void writePly(const std::vector<Eigen::Vector<FloatType, Dim>>& points,
@@ -38,12 +39,12 @@ void writePly(const std::vector<Eigen::Vector<FloatType, Dim>>& points,
     }
 
     tinyply::PlyFile file;
-    file.add_properties_to_element("vertex", {"x", "y", "z"}, tinyply::Type::FLOAT64,
-                                   points.size(), reinterpret_cast<uint8_t*>(pointsOut.data()),
+    file.add_properties_to_element("vertex", {"x", "y", "z"}, tinyply::Type::FLOAT64, points.size(),
+                                   reinterpret_cast<uint8_t*>(pointsOut.data()),
                                    tinyply::Type::INVALID, 0);
 
     std::filebuf fbBinary;
-    std::string filename = path.string(); // + "-binary.ply";
+    std::string filename = path.string();  // + "-binary.ply";
     fbBinary.open(filename, std::ios::out | std::ios::binary);
     std::ostream outstream(&fbBinary);
 
