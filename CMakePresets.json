@@ -5,13 +5,20 @@
     },
     "configurePresets": [
         {
+            "name": "clang-base",
+            "hidden": true,
+            "generator": "Ninja",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++"
+            }
+        },
+        {
             "name": "clang-release",
             "displayName": "Clang Release",
             "description": "Clang Release configuration",
-            "generator": "Unix Makefiles",
+            "inherits": "clang-base",
             "cacheVariables": {
-                "CMAKE_C_COMPILER": "/home/hulfeldl/.local/bin/clang",
-                "CMAKE_CXX_COMPILER": "/home/hulfeldl/.local/bin/clang++",
                 "CMAKE_BUILD_TYPE": "Release"
             },
             "binaryDir": "${sourceDir}/build/clang-release",
@@ -21,10 +28,8 @@
             "name": "clang-debug",
             "displayName": "Clang Debug",
             "description": "Clang Debug configuration",
-            "generator": "Unix Makefiles",
+            "inherits": "clang-base",
             "cacheVariables": {
-                "CMAKE_C_COMPILER": "/home/hulfeldl/.local/bin/clang",
-                "CMAKE_CXX_COMPILER": "/home/hulfeldl/.local/bin/clang++",
                 "CMAKE_BUILD_TYPE": "Debug"
             },
             "binaryDir": "${sourceDir}/build/clang-debug",
