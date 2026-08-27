@@ -2,6 +2,10 @@ cmake_minimum_required(VERSION 4.0)
 
 project(BCPD)
 
+if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_VERSION VERSION_LESS 21)
+    message(FATAL_ERROR "BCPD requires Clang >= 21 (found ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION})")
+endif()
+
 # Add kisync-cmake.
 add_subdirectory(cmake/kisync)
 
