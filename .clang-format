@@ -18,6 +18,7 @@ SpaceInEmptyParentheses: false
 SpaceBeforeCpp11BracedList: false
 
 # Function formatting
+AlwaysBreakTemplateDeclarations: Yes
 AllowShortFunctionsOnASingleLine: Inline
 AllowShortBlocksOnASingleLine: Empty
 AllowShortCaseLabelsOnASingleLine: false
