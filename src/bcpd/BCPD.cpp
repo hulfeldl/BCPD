@@ -7,6 +7,7 @@
 
 #include "BCPD.h"
 
+#include <bcpd/Digamma.h>
 #include <bcpd/GaussianKernel.h>
 #include <bcpd/PlyUtils.h>
 #include <nanoflann.hpp>
@@ -127,39 +128,6 @@ namespace
         std::string name;
         std::chrono::time_point<std::chrono::high_resolution_clock> start;
     };
-
-    /**
-     * @brief Computes the digamma function (derivative of the log-gamma function).
-     *
-     * @tparam FloatType Floating point type.
-     *
-     * @param x_in Input value.
-     *
-     * @return Digamma of x_in.
-     */
-    template <typename FloatType> [[nodiscard]] FloatType digamma(FloatType x_in) noexcept
-    {
-        double x = static_cast<double>(x_in);
-        double r = 0.0;
-
-        while (x <= 5.0)
-        {
-            r -= 1.0 / x;
-            x += 1.0;
-        }
-
-        const double f = 1.0 / (x * x);
-        const double t =
-            f *
-            (-1.0 / 12.0 +
-             f * (1.0 / 120.0 +
-                  f * (-1.0 / 252.0 +
-                       f * (1.0 / 240.0 +
-                            f * (-1.0 / 132.0 + f * (691.0 / 32760.0 +
-                                                     f * (-1.0 / 12.0 + f * 3617.0 / 8160.0)))))));
-
-        return static_cast<FloatType>(r + std::log(x) - 0.5 / x + t);
-    }
 
     /**
      * @brief Computes the unnormalized GMM probability contribution for a point pair.
