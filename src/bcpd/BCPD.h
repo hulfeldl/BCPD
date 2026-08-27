@@ -19,7 +19,8 @@
  * @brief BCPD Algorithm Implementation
  *
  */
-template <class FloatType, uint32_t dim> class BCPD
+template <class FloatType, uint32_t dim>
+class BCPD
 {
 public:
     using VectorType = Eigen::Vector<FloatType, dim>;
@@ -53,10 +54,7 @@ public:
         y = y_in;
     }
 
-    std::vector<VectorType> GetOutput() const noexcept
-    {
-        return y;
-    }
+    std::vector<VectorType> GetOutput() const noexcept { return y; }
 
     void Compute();
 
