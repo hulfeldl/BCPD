@@ -742,11 +742,6 @@ inline void BCPD<FloatType, Dim>::MaximizationStep()
         computeMaximizationDirect(M, cc, E);
     }
 
-    for (uint32_t i = 0u; i < M; ++i)
-    {
-        y_hat[i] = scale * rotation * u_hat[i] + translation;
-    }
-
     updateResidual(N, M);
 
     if constexpr (kWriteDebugOutput)
@@ -925,6 +920,13 @@ void BCPD<FloatType, Dim>::updateResidual(uint32_t N, uint32_t M)
 
     scale = (rotation.transpose() * Sxu).trace() / Suu.trace();
     translation = x_avg - scale * rotation * u_avg;
+
+    // y_hat must be rebuilt with the transform just computed above; using the previous
+    // iteration's transform here leaves the residual one step behind the model it measures.
+    for (uint32_t i = 0u; i < M; ++i)
+    {
+        y_hat[i] = scale * rotation * u_hat[i] + translation;
+    }
 
     if constexpr (kNystrom)
     {
