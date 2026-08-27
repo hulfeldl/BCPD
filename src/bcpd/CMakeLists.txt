@@ -8,6 +8,8 @@ set(LIB_NAME "${DIR_NAME}-${DIR_NAME}")
 add_library(${LIB_NAME} STATIC
         BCPD.cpp
         BCPD.h
+        Digamma.cpp
+        Digamma.h
         Kernel.h
         GaussianKernel.h
         KDTreeVectorOfVectorsAdaptor.h
