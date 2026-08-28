@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cassert>
 #include <chrono>
+#include <cmath>
 #include <complex>
 #include <cstdint>
 #include <cstdlib>
@@ -43,6 +44,17 @@ namespace
 
     constexpr float RESIDUAL_CONVERGENCE_THRESHOLD = 0.001f;
     constexpr uint32_t MAX_ITERATIONS = 100u;
+
+    // The residual can plateau well above RESIDUAL_CONVERGENCE_THRESHOLD (e.g. the Nystrom
+    // approximation carries its own bias floor), in which case the absolute threshold above
+    // never fires and every run burns the full MAX_ITERATIONS. Track the residual's relative
+    // change instead: once it stops improving by more than this fraction for
+    // CONVERGENCE_PATIENCE iterations in a row, further iterations aren't buying anything.
+    // Requiring several consecutive small steps (rather than just one) avoids mistaking a
+    // single incidental small step - e.g. the turning point of a transient oscillation - for
+    // convergence.
+    constexpr float RESIDUAL_RELATIVE_TOLERANCE = 1.0e-4f;
+    constexpr uint32_t CONVERGENCE_PATIENCE = 3u;
     constexpr float RESIDUAL_KDTREE_THRESHOLD = 0.04f;
     constexpr float SEARCH_RADIUS_SCALE = 5.0f;
     constexpr float SEARCH_RADIUS_MAX = 0.1f;
@@ -306,6 +318,9 @@ inline void BCPD<FloatType, Dim>::Compute()
     Initialization();
 
     iter = 0u;
+    FloatType previousResidual = residual;
+    uint32_t plateauCount = 0u;
+
     while (residual > RESIDUAL_CONVERGENCE_THRESHOLD && iter < MAX_ITERATIONS)
     {
         spdlog::info("Iteration: {} residual: {}", iter, residual);
@@ -314,6 +329,33 @@ inline void BCPD<FloatType, Dim>::Compute()
         ExpectationStep();
         MaximizationStep();
         ++iter;
+
+        if (!std::isfinite(residual))
+        {
+            spdlog::warn("Residual became non-finite at iteration {}; stopping.", iter);
+            break;
+        }
+
+        const FloatType relativeChange =
+            std::abs(residual - previousResidual) /
+            std::max(previousResidual, static_cast<FloatType>(RESIDUAL_CONVERGENCE_THRESHOLD));
+        previousResidual = residual;
+
+        if (relativeChange < RESIDUAL_RELATIVE_TOLERANCE)
+        {
+            ++plateauCount;
+            if (plateauCount >= CONVERGENCE_PATIENCE)
+            {
+                spdlog::info(
+                    "Residual plateaued (relative change < {} for {} iterations); stopping.",
+                    RESIDUAL_RELATIVE_TOLERANCE, CONVERGENCE_PATIENCE);
+                break;
+            }
+        }
+        else
+        {
+            plateauCount = 0u;
+        }
     }
 
     spdlog::info("Final: iteration: {} residual: {}", iter, residual);
