@@ -63,8 +63,8 @@ SpacesInParentheses: false
 SpacesInSquareBrackets: false
 
 # Wrapping
-BinPackArguments: true
-BinPackParameters: true
+BinPackArguments: false
+BinPackParameters: false
 BreakInheritanceList: BeforeColon
 BreakConstructorInitializers: BeforeColon
 BreakStringLiterals: true
