@@ -54,7 +54,7 @@ public:
         y = y_in;
     }
 
-    std::vector<VectorType> GetOutput() const noexcept { return y; }
+    std::vector<VectorType> GetOutput() const noexcept { return y_hat; }
 
     void Compute();
 
