@@ -279,41 +279,72 @@ namespace
         eigenVectors = kernelMxK * U * eigenValues.inverse();
     }
 
-}  // namespace
-
-/**
- * @brief Runs the BCPD registration until convergence or the iteration limit is reached.
- */
-template <typename FloatType, uint32_t Dim>
-inline void BCPD<FloatType, Dim>::Compute()
-{
-    auto normalizePoints = [](std::vector<VectorType>& points) -> void
+    /**
+     * @brief Centers a point cloud on its centroid and rescales it to unit RMS extent.
+     *
+     * @param points Points to normalize in place.
+     * @param[out] centroid Centroid subtracted from each point.
+     * @param[out] pointScale RMS extent points were divided by after centering.
+     */
+    template <typename FloatType, uint32_t Dim, typename VectorType = Eigen::Vector<FloatType, Dim>>
+    void normalizePoints(std::vector<VectorType>& points,
+                         VectorType& centroid,
+                         FloatType& pointScale)
     {
+        centroid = VectorType::Zero();
+        pointScale = FloatType(1.0);
+
         if (points.empty())
             return;
 
-        VectorType centroid = VectorType::Zero();
         for (const auto& p : points)
         {
             centroid += p;
         }
         centroid /= static_cast<FloatType>(points.size());
 
-        FloatType scale = 0.0;
+        FloatType sumSquaredNorm = 0.0;
         for (const auto& p : points)
         {
-            scale += (p - centroid).squaredNorm();
+            sumSquaredNorm += (p - centroid).squaredNorm();
         }
-        scale = std::sqrt(scale / (static_cast<FloatType>(points.size() * Dim)));
+        pointScale = std::sqrt(sumSquaredNorm / (static_cast<FloatType>(points.size() * Dim)));
 
         for (auto& p : points)
         {
-            p = (p - centroid) / scale;
+            p = (p - centroid) / pointScale;
         }
-    };
+    }
 
-    normalizePoints(x);
-    normalizePoints(y);
+    /**
+     * @brief Undoes normalizePoints(): maps normalized points back into the original frame.
+     *
+     * @param points Points to denormalize in place.
+     * @param centroid Centroid produced by the matching normalizePoints() call.
+     * @param pointScale RMS extent produced by the matching normalizePoints() call.
+     */
+    template <typename FloatType, uint32_t Dim, typename VectorType = Eigen::Vector<FloatType, Dim>>
+    void denormalizePoints(std::vector<VectorType>& points,
+                           const VectorType& centroid,
+                           FloatType pointScale)
+    {
+        for (auto& p : points)
+        {
+            p = p * pointScale + centroid;
+        }
+    }
+}  // namespace
+
+/**
+ * @brief Runs the BCPD registration until convergence or the iteration limit is reached.
+ */
+template <typename FloatType, uint32_t Dim>
+void BCPD<FloatType, Dim>::Compute()
+{
+    VectorType yCentroid = VectorType::Zero();
+    FloatType yScale = FloatType(1.0);
+    normalizePoints<FloatType, Dim>(x, xCentroid, xScale);
+    normalizePoints<FloatType, Dim>(y, yCentroid, yScale);
 
     Initialization();
 
@@ -359,6 +390,10 @@ inline void BCPD<FloatType, Dim>::Compute()
     }
 
     spdlog::info("Final: iteration: {} residual: {}", iter, residual);
+
+    // y_hat was computed in normalized space; map it back into the original coordinate frame of the
+    // x point cloud (since it was registered to the x point cloud).
+    denormalizePoints<FloatType, Dim>(y_hat, xCentroid, xScale);
 }
 
 /**

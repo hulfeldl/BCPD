@@ -97,6 +97,8 @@ private:
     VectorType translation = VectorType::Zero();
     std::vector<VectorType> y_hat;
     FloatType residual = FloatType(0.0);
+    VectorType xCentroid = VectorType::Zero();
+    FloatType xScale = FloatType(1.0);
 
     // Initialization
     EigenMatrix G;
