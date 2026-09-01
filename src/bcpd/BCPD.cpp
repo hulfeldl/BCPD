@@ -860,7 +860,7 @@ void BCPD<FloatType, Dim>::computeMaximizationNystrom(uint32_t M, FloatType cc,
     {
         for (uint32_t j = 0u; j < M; ++j)
         {
-            v_hatK[i] += cc * sigmaKxM(i, j) * nu[j] * E[j];
+            v_hatK[i] += sigmaKxM(i, j) * nu[j] * E[j];
         }
     }
 
