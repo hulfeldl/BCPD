@@ -9,6 +9,8 @@
 
 #include <bcpd/BCPD.h>
 #include <catch2/catch_test_macros.hpp>
+#include <spdlog/fmt/ostr.h>
+#include <spdlog/spdlog.h>
 
 #include <filesystem>
 #include <fstream>
@@ -69,6 +71,59 @@ namespace
 
         return vectors;
     }
+
+    /**
+     * @brief Writes a point cloud vector to a PLY file in the test output directory.
+     *
+     * @tparam FloatType Floating-point type for vector components (float, double, etc.)
+     * @tparam Dim Dimensionality of each point (typically 2 or 3)
+     *
+     * @param name Subdirectory name within the output folder (e.g., "2D_square", "armadillo")
+     * @param y The point cloud data as a vector of Eigen vectors to be written
+     * @param outputName Output filename (default: "yOut.ply")
+     */
+    template <typename FloatType, uint32_t Dim>
+    void writeOutput(std::string name,
+                     const std::vector<Eigen::Vector<FloatType, Dim>>& y,
+                     std::string outputName = "yOut.ply")
+    {
+        const auto outDir = testDataDir / "output" / name;
+        std::filesystem::create_directories(outDir);
+
+        writePly<FloatType, Dim>(y, outDir / outputName);
+    }
+
+    /**
+     * @brief Reads point cloud data from a text file and optionally writes it as a PLY file.
+     *
+     * @tparam FloatType Floating-point type for vector components (float, double, etc.)
+     * @tparam Dim Dimensionality of each point (typically 2 or 3)
+     *
+     * @param data_dir Directory containing the input text file
+     * @param fileName Name of the input text file.
+     *
+     * @return std::vector<Eigen::Vector<FloatType, Dim>> Vector of read Eigen vectors
+     */
+    template <typename FloatType, uint32_t Dim>
+    std::vector<Eigen::Vector<FloatType, Dim>> readAndWriteInput(
+        const std::filesystem::path& data_dir, const std::filesystem::path& fileName)
+    {
+        // Replace file extension with ply.
+        auto filePly = fileName;
+        filePly.replace_extension("ply");
+
+        // Read data.
+        const auto data = readEigenVectorsFromTxtFile<FloatType, 3u>(data_dir / fileName);
+
+        // Write ply file if it does not exist.
+        if (!std::filesystem::exists(filePly))
+        {
+            writePly<FloatType, Dim>(data, data_dir / filePly);
+        }
+
+        return data;
+    }
+
 }  // namespace
 
 /**
@@ -304,35 +359,6 @@ TEST_CASE("3D face registration", "[bcpd]")
     bcpd.SetInput(x, y);
     bcpd.Compute();
     REQUIRE(true);
-}
-
-template <typename FloatType, uint32_t Dim>
-void writeOutput(std::string name, const std::vector<Eigen::Vector<FloatType, Dim>>& y)
-{
-    const auto outDir = testDataDir / "output" / name;
-    std::filesystem::create_directories(outDir);
-
-    writePly<FloatType, Dim>(y, outDir / "yOut.ply");
-}
-
-template <typename FloatType, uint32_t Dim>
-std::vector<Eigen::Vector<FloatType, Dim>> readAndWriteInput(const std::filesystem::path& data_dir,
-                                                             const std::filesystem::path& fileName)
-{
-    // Replace file extension with ply.
-    auto filePly = fileName;
-    filePly.replace_extension("ply");
-
-    // Read data.
-    const auto data = readEigenVectorsFromTxtFile<FloatType, 3u>(data_dir / fileName);
-
-    // Write ply file if it does not exist.
-    if (!std::filesystem::exists(filePly))
-    {
-        writePly<FloatType, Dim>(data, data_dir / filePly);
-    }
-
-    return data;
 }
 
 /**

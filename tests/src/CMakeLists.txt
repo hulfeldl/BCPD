@@ -23,6 +23,7 @@ target_link_libraries(${EXEC_NAME}
     PRIVATE
         Catch2::Catch2WithMain
         bcpd-bcpd
+        spdlog::spdlog
 )
 
 add_test(NAME ${EXEC_NAME} COMMAND ${EXEC_NAME})
