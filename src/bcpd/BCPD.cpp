@@ -18,6 +18,7 @@
 #include <chrono>
 #include <cmath>
 #include <complex>
+#include <concepts>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -34,9 +35,7 @@ namespace
 {
     // Hardcoded constants.
     constexpr bool kNystrom = true;
-    // constexpr bool kVisualize = false;
     constexpr bool kWriteDebugOutput = true;
-    // constexpr bool kPrintDebug = false;
 
     // If true, RNGs used for landmark/pivot sampling are seeded from a fixed value so runs are
     // reproducible; if false, they are seeded from std::random_device on each use.
@@ -97,7 +96,6 @@ namespace
     [[nodiscard]] std::mt19937 makeRng(uint32_t seedOffset = 0u)
     {
         constexpr uint32_t kFixedSeed = 0u;
-
         if constexpr (kDeterministicSeeding)
         {
             return std::mt19937{kFixedSeed + seedOffset};
@@ -132,6 +130,11 @@ namespace
         {
         }
 
+        TimeTracker(const TimeTracker&) = delete;
+        TimeTracker& operator=(const TimeTracker&) = delete;
+        TimeTracker(TimeTracker&&) = delete;
+        TimeTracker& operator=(TimeTracker&&) = delete;
+
         ~TimeTracker()
         {
             const auto end = std::chrono::high_resolution_clock::now();
@@ -157,7 +160,7 @@ namespace
      *
      * @return Unnormalized probability p_mn.
      */
-    template <typename FloatType>
+    template <std::floating_point FloatType>
     [[nodiscard]] FloatType calculateP(FloatType xyDist2, FloatType residual2, FloatType alpha,
                                        FloatType omega) noexcept
     {
@@ -190,7 +193,7 @@ namespace
      *
      * @return The numLandmarks x numLandmarks symmetric kernel matrix.
      */
-    template <typename FloatType, typename KernelFn>
+    template <std::floating_point FloatType, typename KernelFn>
     [[nodiscard]] Eigen::Matrix<FloatType, Eigen::Dynamic, Eigen::Dynamic>
     buildSymmetricKernelMatrix(uint32_t numLandmarks, KernelFn&& kernelFn)
     {
@@ -220,7 +223,7 @@ namespace
      *
      * @return The numQuery x numLandmarks cross kernel matrix.
      */
-    template <typename FloatType, typename KernelFn>
+    template <std::floating_point FloatType, typename KernelFn>
     [[nodiscard]] Eigen::Matrix<FloatType, Eigen::Dynamic, Eigen::Dynamic> buildCrossKernelMatrix(
         uint32_t numQuery, uint32_t numLandmarks, KernelFn&& kernelFn)
     {
@@ -248,7 +251,7 @@ namespace
      * @param[out] eigenVectors Approximated eigenvectors of the kernel matrix.
      * @param[out] eigenValues Approximated eigenvalues of the kernel matrix.
      */
-    template <typename FloatType, uint32_t Dim>
+    template <std::floating_point FloatType, uint32_t Dim>
     void calculateNystromApprox(
         const Kernel<FloatType, Dim>& kernel, const std::vector<Eigen::Vector<FloatType, Dim>>& y,
         uint32_t kSamples, Eigen::Matrix<FloatType, Eigen::Dynamic, Eigen::Dynamic>& eigenVectors,
@@ -290,7 +293,9 @@ namespace
      * @param[out] centroid Centroid subtracted from each point.
      * @param[out] pointScale RMS extent points were divided by after centering.
      */
-    template <typename FloatType, uint32_t Dim, typename VectorType = Eigen::Vector<FloatType, Dim>>
+    template <std::floating_point FloatType,
+              uint32_t Dim,
+              typename VectorType = Eigen::Vector<FloatType, Dim>>
     void normalizePoints(std::vector<VectorType>& points,
                          VectorType& centroid,
                          FloatType& pointScale)
@@ -327,7 +332,9 @@ namespace
      * @param centroid Centroid produced by the matching normalizePoints() call.
      * @param pointScale RMS extent produced by the matching normalizePoints() call.
      */
-    template <typename FloatType, uint32_t Dim, typename VectorType = Eigen::Vector<FloatType, Dim>>
+    template <std::floating_point FloatType,
+              uint32_t Dim,
+              typename VectorType = Eigen::Vector<FloatType, Dim>>
     void denormalizePoints(std::vector<VectorType>& points,
                            const VectorType& centroid,
                            FloatType pointScale)
@@ -406,8 +413,8 @@ void BCPD<FloatType, Dim>::Compute()
 template <typename FloatType, uint32_t Dim>
 inline void BCPD<FloatType, Dim>::Initialization()
 {
-    const uint32_t N = x.size();
-    const uint32_t M = y.size();
+    const uint32_t N = static_cast<uint32_t>(x.size());
+    const uint32_t M = static_cast<uint32_t>(y.size());
 
     TimeTracker tr("Initialization");
 
@@ -480,8 +487,8 @@ inline void BCPD<FloatType, Dim>::ExpectationStep()
 {
     TimeTracker tr("ExpectationStep");
 
-    const uint32_t N = x.size();
-    const uint32_t M = y.size();
+    const uint32_t N = static_cast<uint32_t>(x.size());
+    const uint32_t M = static_cast<uint32_t>(y.size());
     sigmaSQR = residual;
 
     if constexpr (kNystrom)
@@ -756,11 +763,7 @@ void BCPD<FloatType, Dim>::computeExpectationKdTree(uint32_t N, uint32_t M)
 template <typename FloatType, uint32_t Dim>
 void BCPD<FloatType, Dim>::computeExpectationDirect(uint32_t N, uint32_t M)
 {
-    P.resize(N);
-    for (uint32_t n = 0u; n < N; ++n)
-    {
-        P[n].resize(M);
-    }
+    P.assign(N, std::vector<FloatType>(M));
 
     for (uint32_t n = 0u; n < N; ++n)
     {
@@ -816,8 +819,8 @@ inline void BCPD<FloatType, Dim>::MaximizationStep()
 {
     TimeTracker tr("MaximizationStep");
 
-    const uint32_t N = x.size();
-    const uint32_t M = y.size();
+    const uint32_t N = static_cast<uint32_t>(x.size());
+    const uint32_t M = static_cast<uint32_t>(y.size());
 
     std::vector<VectorType> E(M);
     for (uint32_t i = 0u; i < M; ++i)
