@@ -135,8 +135,8 @@ namespace
  * cloud (y) is a translated version of the reference point cloud (x), allowing
  * verification that the algorithm can recover the applied transformation.
  *
- * @pre The BCPD algorithm is properly initialized with standard parameters
- * @post The algorithm completes without errors and converges to a solution
+ * @pre The BCPD algorithm is properly initialized with standard parameters.
+ * @post The algorithm completes without errors and converges to a solution.
  * @see BCPD::SetInput
  * @see BCPD::Compute
  */
@@ -153,7 +153,7 @@ TEST_CASE("2D square test", "[bcpd]")
     x.emplace_back(0.0, 1.0);
     x.emplace_back(1.0, 1.0);
 
-    const VectorType translation{0.01, 0.02};
+    const VectorType translation{0.5, 0.9};
     std::vector<VectorType> y;
     y.reserve(x.size());
     for (const auto& point : x)
@@ -169,7 +169,25 @@ TEST_CASE("2D square test", "[bcpd]")
     BCPDType bcpd(beta, lambda, omega, gamma);
     bcpd.SetInput(x, y);
     bcpd.Compute();
-    REQUIRE(true);
+
+    // output final points.
+    uint32_t i = 0u;
+    for (const auto& point : bcpd.GetOutput())
+    {
+        spdlog::info("yOut {}: {:.2f} {:.2f}", i, point[0], point[1]);
+        i++;
+    }
+
+    // y is a pure translation of x with the points in matching order, so a successful
+    // registration has to map every y point back onto the x point it was generated from.
+    constexpr FloatType tolerance = 1.0e-6;
+    const auto yOut = bcpd.GetOutput();
+    REQUIRE(yOut.size() == x.size());
+    for (std::size_t j = 0u; j < x.size(); ++j)
+    {
+        INFO("point index " << j);
+        REQUIRE((yOut[j] - x[j]).norm() < tolerance);
+    }
 }
 
 /**
@@ -261,8 +279,8 @@ TEST_CASE("3D circle and ellipse", "[bcpd]")
         {
             const FloatType v = static_cast<FloatType>(j) / static_cast<FloatType>(num_y);
             const FloatType phi = std::acos(2.0 * v - 1.0);
-            x.emplace_back(std::cos(angle) * std::cos(phi), std::sin(angle) * std::cos(phi),
-                           std::sin(phi));
+            x.emplace_back(
+                std::cos(angle) * std::cos(phi), std::sin(angle) * std::cos(phi), std::sin(phi));
         }
     }
 
