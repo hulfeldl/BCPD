@@ -62,6 +62,10 @@ namespace
     constexpr uint32_t NEAREST_NEIGHBORS_FALLBACK = 5u;
     constexpr float EPSILON_REGULARIZATION = 1.0e-10f;
 
+    // Threshold for kernelVxV SVD: ignores near-zero singular values caused by converging pivots to
+    // avoid rounding error amplification in the pseudo-inverse.
+    constexpr float NYSTROM_PINV_RELATIVE_TOLERANCE = 1.0e-9f;
+
     /**
      * @brief Gets the directory debug output should be written to.
      *
@@ -515,7 +519,12 @@ inline void BCPD<FloatType, Dim>::ExpectationStep()
 template <typename FloatType, uint32_t Dim>
 void BCPD<FloatType, Dim>::computeExpectationNystrom(uint32_t N, uint32_t M)
 {
-    const uint32_t numVSamples = std::min(2u * (vSamples / 2u), static_cast<uint32_t>(x.size()));
+    // Sample pivots independently from each cloud (instead of capping the total by x.size()),
+    // so small clouds are still fully covered.
+    const uint32_t maxPerCloud = vSamples / 2u;
+    const uint32_t numXSamples = std::min(maxPerCloud, N);
+    const uint32_t numYSamples = std::min(maxPerCloud, M);
+    const uint32_t numVSamples = numXSamples + numYSamples;
 
     std::vector<uint32_t> indicesX(N);
     std::vector<uint32_t> indicesY(M);
@@ -527,12 +536,15 @@ void BCPD<FloatType, Dim>::computeExpectationNystrom(uint32_t N, uint32_t M)
 
     spdlog::debug("Using Nystrom method for P computation");
 
-    std::vector<VectorType> v(numVSamples);
-    const uint32_t sampleCount = numVSamples / 2u;
-    for (uint32_t i = 0u; i < sampleCount; ++i)
+    std::vector<VectorType> v;
+    v.reserve(numVSamples);
+    for (uint32_t i = 0u; i < numXSamples; ++i)
     {
-        v[2u * i] = x[indicesX[i]];
-        v[2u * i + 1u] = y_hat[indicesY[i]];
+        v.push_back(x[indicesX[i]]);
+    }
+    for (uint32_t i = 0u; i < numYSamples; ++i)
+    {
+        v.push_back(y_hat[indicesY[i]]);
     }
 
     const auto gaussianKernel = [this](const VectorType& a, const VectorType& b) -> FloatType
@@ -544,7 +556,12 @@ void BCPD<FloatType, Dim>::computeExpectationNystrom(uint32_t N, uint32_t M)
     const EigenMatrix kernelXxV = buildCrossKernelMatrix<FloatType>(
         N, numVSamples, [&](uint32_t n, uint32_t k) { return gaussianKernel(x[n], v[k]); });
 
-    const EigenMatrix kernelVxX = kernelVxV.inverse() * kernelXxV.transpose();
+    // As registration converges, y_hat approaches x and kernelVxV becomes near-singular. Use a
+    // pseudo-inverse to drop the degenerate directions instead of amplifying them.
+    Eigen::JacobiSVD<EigenMatrix> kernelVxVSvd(kernelVxV,
+                                               Eigen::ComputeThinU | Eigen::ComputeThinV);
+    kernelVxVSvd.setThreshold(static_cast<FloatType>(NYSTROM_PINV_RELATIVE_TOLERANCE));
+    const EigenMatrix kernelVxX = kernelVxVSvd.solve(kernelXxV.transpose());
 
     const EigenMatrix kernelYxV = buildCrossKernelMatrix<FloatType>(
         M, numVSamples, [&](uint32_t m, uint32_t k) { return gaussianKernel(y_hat[m], v[k]); });
