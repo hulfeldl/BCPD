@@ -161,7 +161,9 @@ namespace
      * @return Unnormalized probability p_mn.
      */
     template <std::floating_point FloatType>
-    [[nodiscard]] FloatType calculateP(FloatType xyDist2, FloatType residual2, FloatType alpha,
+    [[nodiscard]] FloatType calculateP(FloatType xyDist2,
+                                       FloatType residual2,
+                                       FloatType alpha,
                                        FloatType omega) noexcept
     {
         constexpr FloatType TWO_PI = 2.0 * std::numbers::pi_v<FloatType>;
@@ -253,8 +255,10 @@ namespace
      */
     template <std::floating_point FloatType, uint32_t Dim>
     void calculateNystromApprox(
-        const Kernel<FloatType, Dim>& kernel, const std::vector<Eigen::Vector<FloatType, Dim>>& y,
-        uint32_t kSamples, Eigen::Matrix<FloatType, Eigen::Dynamic, Eigen::Dynamic>& eigenVectors,
+        const Kernel<FloatType, Dim>& kernel,
+        const std::vector<Eigen::Vector<FloatType, Dim>>& y,
+        uint32_t kSamples,
+        Eigen::Matrix<FloatType, Eigen::Dynamic, Eigen::Dynamic>& eigenVectors,
         Eigen::DiagonalMatrix<FloatType, Eigen::Dynamic>& eigenValues)
     {
 
@@ -280,7 +284,8 @@ namespace
         eigenValues.diagonal().array() += EPSILON_REGULARIZATION;
 
         MatrixType kernelMxK = buildCrossKernelMatrix<FloatType>(
-            static_cast<uint32_t>(y.size()), kSamples,
+            static_cast<uint32_t>(y.size()),
+            kSamples,
             [&](uint32_t m, uint32_t k) { return kernel.compute(y[m], y[indices[k]]); });
 
         eigenVectors = kernelMxK * U * eigenValues.inverse();
@@ -390,7 +395,8 @@ void BCPD<FloatType, Dim>::Compute()
             {
                 spdlog::info(
                     "Residual plateaued (relative change < {} for {} iterations); stopping.",
-                    RESIDUAL_RELATIVE_TOLERANCE, CONVERGENCE_PATIENCE);
+                    RESIDUAL_RELATIVE_TOLERANCE,
+                    CONVERGENCE_PATIENCE);
                 break;
             }
         }
@@ -679,8 +685,8 @@ void BCPD<FloatType, Dim>::computeExpectationKdTree(uint32_t N, uint32_t M)
             std::vector<std::size_t> ret_index(NEAREST_NEIGHBORS_FALLBACK);
             std::vector<FloatType> out_dist_sqr(NEAREST_NEIGHBORS_FALLBACK);
 
-            xKdTree->query(y_hat[m].data(), NEAREST_NEIGHBORS_FALLBACK, ret_index.data(),
-                           out_dist_sqr.data());
+            xKdTree->query(
+                y_hat[m].data(), NEAREST_NEIGHBORS_FALLBACK, ret_index.data(), out_dist_sqr.data());
 
             for (uint32_t i = 0u; i < NEAREST_NEIGHBORS_FALLBACK; ++i)
             {
@@ -858,7 +864,8 @@ inline void BCPD<FloatType, Dim>::MaximizationStep()
  * @param E Per-point residual displacement vectors.
  */
 template <typename FloatType, uint32_t Dim>
-void BCPD<FloatType, Dim>::computeMaximizationNystrom(uint32_t M, FloatType cc,
+void BCPD<FloatType, Dim>::computeMaximizationNystrom(uint32_t M,
+                                                      FloatType cc,
                                                       const std::vector<VectorType>& E)
 {
     // Reuses the same Nystrom decomposition (Q, LAMBDA) that calculateNystromApprox()
@@ -907,7 +914,8 @@ void BCPD<FloatType, Dim>::computeMaximizationNystrom(uint32_t M, FloatType cc,
  * @param E Per-point residual displacement vectors.
  */
 template <typename FloatType, uint32_t Dim>
-void BCPD<FloatType, Dim>::computeMaximizationDirect(uint32_t M, FloatType cc,
+void BCPD<FloatType, Dim>::computeMaximizationDirect(uint32_t M,
+                                                     FloatType cc,
                                                      const std::vector<VectorType>& E)
 {
     sigma.setZero(M, M);
