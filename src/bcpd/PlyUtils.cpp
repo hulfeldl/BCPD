@@ -39,9 +39,13 @@ void writePly(const std::vector<Eigen::Vector<FloatType, Dim>>& points,
     }
 
     tinyply::PlyFile file;
-    file.add_properties_to_element("vertex", {"x", "y", "z"}, tinyply::Type::FLOAT64, points.size(),
+    file.add_properties_to_element("vertex",
+                                   {"x", "y", "z"},
+                                   tinyply::Type::FLOAT64,
+                                   points.size(),
                                    reinterpret_cast<uint8_t*>(pointsOut.data()),
-                                   tinyply::Type::INVALID, 0);
+                                   tinyply::Type::INVALID,
+                                   0);
 
     std::filebuf fbBinary;
     std::string filename = path.string();  // + "-binary.ply";

@@ -50,8 +50,11 @@
  *  \tparam IndexType The type for indices in the KD-tree index
  *         (typically, size_t of int)
  */
-template <class VectorOfVectorsType, typename num_t = double, int DIM = -1,
-          class Distance = nanoflann::metric_L2, typename IndexType = size_t>
+template <class VectorOfVectorsType,
+          typename num_t = double,
+          int DIM = -1,
+          class Distance = nanoflann::metric_L2,
+          typename IndexType = size_t>
 struct KDTreeVectorOfVectorsAdaptor
 {
     using self_t =
@@ -65,7 +68,8 @@ struct KDTreeVectorOfVectorsAdaptor
 
     /// Constructor: takes a const ref to the vector of vectors object with the
     /// data points
-    KDTreeVectorOfVectorsAdaptor(const size_t /* dimensionality */, const VectorOfVectorsType& mat,
+    KDTreeVectorOfVectorsAdaptor(const size_t /* dimensionality */,
+                                 const VectorOfVectorsType& mat,
                                  const int leaf_max_size = 10,
                                  const unsigned int n_thread_build = 1)
         : m_data(mat)
@@ -76,7 +80,8 @@ struct KDTreeVectorOfVectorsAdaptor
             throw std::runtime_error("Data set dimensionality does not match the 'DIM' template "
                                      "argument");
         index = new index_t(
-            static_cast<int>(dims), *this /* adaptor */,
+            static_cast<int>(dims),
+            *this /* adaptor */,
             nanoflann::KDTreeSingleIndexAdaptorParams(
                 leaf_max_size, nanoflann::KDTreeSingleIndexAdaptorFlags::None, n_thread_build));
     }
@@ -90,7 +95,9 @@ struct KDTreeVectorOfVectorsAdaptor
      *  Note that this is a short-cut method for index->findNeighbors().
      *  The user can also call index->... methods as desired.
      */
-    inline void query(const num_t* query_point, const size_t num_closest, IndexType* out_indices,
+    inline void query(const num_t* query_point,
+                      const size_t num_closest,
+                      IndexType* out_indices,
                       num_t* out_distances_sq) const
     {
         nanoflann::KNNResultSet<num_t, IndexType> resultSet(num_closest);

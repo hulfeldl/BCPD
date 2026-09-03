@@ -36,7 +36,10 @@ public:
     {
     }
 
-    explicit BCPD(FloatType beta, FloatType lambda, FloatType omega, FloatType gamma,
+    explicit BCPD(FloatType beta,
+                  FloatType lambda,
+                  FloatType omega,
+                  FloatType gamma,
                   FloatType kappa) noexcept
         : m_beta(beta), m_lambda(lambda), m_omega(omega), m_gamma(gamma), m_kappa(kappa)
     {
