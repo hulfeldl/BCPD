@@ -692,7 +692,7 @@ void BCPD<FloatType, Dim>::computeExpectationKdTree(uint32_t N, uint32_t M)
             {
                 ret_matches.emplace_back(ret_index[i], out_dist_sqr[i]);
             }
-            spdlog::warn("No matches found at m={}", m);
+            spdlog::debug("No matches found at m={}", m);
         }
 
         for (const auto& xNeighbor : ret_matches)
